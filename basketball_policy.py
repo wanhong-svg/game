@@ -320,7 +320,8 @@ def main():
             "ELIGIBLE means policy-qualified, not a confirmed cross-platform matched pair.",
             "A source remains NEEDS_REVIEW until its actual full-game including-overtime settlement is verified.",
             "Unknown aliases, unsupported markets and out-of-scope leagues are never guessed.",
-            "Event-time tolerance is enforced by the HAR mapper; candidates still require manual market/settlement equivalence review.",\n            "Odds freshness remains unverified unless a source observation timestamp is present; missing timestamps are not treated as fresh."
+            "Event-time tolerance is enforced by the HAR mapper; candidates still require manual market/settlement equivalence review.",
+            "Odds freshness remains unverified unless a source observation timestamp is present; missing timestamps are not treated as fresh."
         ]
     }
     Path(args.out).write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
