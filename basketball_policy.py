@@ -10,6 +10,7 @@ import json
 import re
 from pathlib import Path
 from decimal import Decimal, InvalidOperation
+from datetime import datetime, timezone
 
 ALLOWED_MARKETS = [
     "BASKETBALL_FT_HANDICAP",
@@ -139,6 +140,57 @@ def platform_settlement_state(platform_cfg):
     return "REVIEW", "来源全场盘口是否包含加时尚未核实"
 
 
+
+def event_time_delta_seconds(a, b):
+    """Return absolute kickoff delta in seconds; None means unverifiable."""
+    try:
+        return abs(int(a) - int(b)) / 1000
+    except (TypeError, ValueError):
+        return None
+
+
+def reverse_selection(selection, market_type):
+    """Normalize a reversed home/away pairing without guessing unknown labels."""
+    value = str(selection or "").strip().lower()
+    swaps = {"home": "away", "away": "home", "主": "客", "客": "主",
+             "主队": "客队", "客队": "主队", "1": "2", "2": "1"}
+    if market_type == "BASKETBALL_FT_HANDICAP":
+        return swaps.get(value, selection)
+    if market_type == "BASKETBALL_FT_MONEYLINE":
+        return swaps.get(value, selection)
+    return selection
+
+
+def freshness_state(observed_at, max_age_seconds, now=None):
+    if not observed_at:
+        return "UNKNOWN", "缺少来源观测时间，无法验证赔率新鲜度"
+    try:
+        stamp = datetime.fromisoformat(str(observed_at).replace("Z", "+00:00"))
+        current = now or datetime.now(timezone.utc)
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=timezone.utc)
+        age = (current - stamp).total_seconds()
+    except (TypeError, ValueError):
+        return "UNKNOWN", "来源观测时间格式无效"
+    if age < -5:
+        return "UNKNOWN", "来源观测时间晚于当前时间，时钟口径待核实"
+    if age > max_age_seconds:
+        return "STALE", f"来源数据已过期（{int(age)}秒）"
+    return "FRESH", "来源数据处于新鲜度阈值内"
+
+
+def event_pair_state(venue, event_id, pingbo_id, payload, cfg):
+    if venue == "PINGBO":
+        return "NOT_APPLICABLE", None
+    candidates = [c for c in payload.get("cross_venue_event_candidates", [])
+                  if c.get("venue_event") == venue
+                  and str(c.get("event_id")) == str(event_id)
+                  and str(c.get("pingbo_event_id")) == str(pingbo_id)]
+    if not candidates:
+        return "UNVERIFIED", "未找到同时满足球队与开赛时间容差的跨平台赛事候选"
+    return "VERIFIED_CANDIDATE", candidates[0]
+
+
 def normalize_rows(payload, cfg):
     evmap = event_lookup(payload)
     source_rows = [("FB", x) for x in payload.get("markets", []) if x.get("venue") == "FB"]
@@ -184,7 +236,20 @@ def normalize_rows(payload, cfg):
         else:
             selections = row.get("selections", [])
 
+        orientation = None
+        if venue == "PINGBO":
+            pair = next((c for c in payload.get("cross_venue_event_candidates", [])
+                         if str(c.get("pingbo_event_id")) == str(row.get("event_id"))), None)
+            orientation = pair.get("orientation") if pair else None
         for sel in selections:
+            sel = dict(sel)
+            if orientation == "reversed":
+                original = sel.get("selection", sel.get("selection_code"))
+                sel["selection"] = reverse_selection(original, market_type)
+                if market_type == "BASKETBALL_FT_HANDICAP":
+                    raw_line = as_decimal(line)
+                    if raw_line is not None:
+                        line = str(-raw_line)
             odds = as_decimal(sel.get("decimal_odds"))
             if odds is None or odds <= 1:
                 continue
@@ -196,7 +261,7 @@ def normalize_rows(payload, cfg):
                 "canonical_competition": league,
                 "home_team": ev.get("home"),
                 "away_team": ev.get("away"),
-                "market_type": market_type,
+                "market_type": market_type,\n                "event_orientation": orientation or "same_or_source_native",
                 "period": "FULL_TIME",
                 "settlement_scope": EXPECTED_SETTLEMENT,
                 "include_overtime": True,
@@ -241,7 +306,7 @@ def main():
             "ELIGIBLE means policy-qualified, not a confirmed cross-platform matched pair.",
             "A source remains NEEDS_REVIEW until its actual full-game including-overtime settlement is verified.",
             "Unknown aliases, unsupported markets and out-of-scope leagues are never guessed.",
-            "Event-time tolerance, odds freshness and FX freshness require comparable timestamps/rate snapshots; missing values remain unverified."
+            "Event-time tolerance is enforced by the HAR mapper; candidates still require manual market/settlement equivalence review.",\n            "Odds freshness remains unverified unless a source observation timestamp is present; missing timestamps are not treated as fresh."
         ]
     }
     Path(args.out).write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
