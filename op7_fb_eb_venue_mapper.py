@@ -78,6 +78,12 @@ def as_int(v):
     try: return int(v)
     except (ValueError,TypeError): return None
 
+def timestamp_ms(v):
+    n=as_int(v)
+    if n is None: return None
+    # Accept Unix seconds or milliseconds; normalize to milliseconds.
+    return n*1000 if abs(n) < 100000000000 else n
+
 def dec(v):
     try: return Decimal(str(v))
     except (InvalidOperation,ValueError,TypeError): return None
@@ -337,11 +343,11 @@ def process_har(path,precision=2,event_time_tolerance_minutes=5):
     for venue in ('FB','EB'):
         for (_,eid),ev in [(k,v) for k,v in events.items() if k[0]==venue]:
             h,a=norm_team(ev.get('home')),norm_team(ev.get('away'))
-            t1=as_int(ev.get('start_time_ms'))
+            t1=timestamp_ms(ev.get('start_time_ms'))
             if not h or not a or t1 is None: continue
             for pe in pb_events:
                 ph,pa=norm_team(pe.get('home')),norm_team(pe.get('away'))
-                t2=as_int(pe.get('start_time_ms'))
+                t2=timestamp_ms(pe.get('start_time_ms'))
                 if t2 is None: continue
                 delta=abs(t1-t2)
                 if delta > event_time_tolerance_minutes*60*1000: continue
