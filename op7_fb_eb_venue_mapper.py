@@ -306,7 +306,10 @@ def process_har(path,precision=2,event_time_tolerance_minutes=5):
                     row=event_summary(n,'FB')
                     if row.get('event_id') is not None: events[('FB',str(row['event_id']))]=row
         elif venue=='PINGBO' and p.endswith('/compact/events'):
-            pb_events.extend(extract_pingbo_events(obj))
+            discovered=extract_pingbo_events(obj)
+            for event in discovered:
+                event['observed_at_utc']=e.get('startedDateTime')
+            pb_events.extend(discovered)
     # Second pass: flatten market payloads with event IDs attached.
     for e in entries:
         url=e.get('request',{}).get('url',''); venue=identify_venue(url)
@@ -315,11 +318,15 @@ def process_har(path,precision=2,event_time_tolerance_minutes=5):
         if obj is None: continue
         d=obj.get('data') if isinstance(obj,dict) and 'data' in obj else obj
         if venue=='EB' and p.endswith('getMatchOddsInfoPB'):
-            rows,bad=flatten_eb_markets(d,precision,eb_event_status); markets.extend(rows); invalid['EB']+=bad
+            rows,bad=flatten_eb_markets(d,precision,eb_event_status)
+            for row in rows: row['observed_at_utc']=e.get('startedDateTime')
+            markets.extend(rows); invalid['EB']+=bad
         elif venue=='FB' and p.endswith('getMatchDetail'):
             eid=None
             if isinstance(d,dict): eid=first(d,'id','mid')
-            rows,bad=flatten_fb_markets(d,precision,eid); markets.extend(rows); invalid['FB']+=bad
+            rows,bad=flatten_fb_markets(d,precision,eid)
+            for row in rows: row['observed_at_utc']=e.get('startedDateTime')
+            markets.extend(rows); invalid['FB']+=bad
     markets=dedupe_markets(markets)
     pb_unique={e['event_id']:e for e in pb_events}
     pb_events=list(pb_unique.values())
