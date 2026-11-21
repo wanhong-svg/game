@@ -40,10 +40,30 @@ pip install playwright
 playwright install chromium
 ```
 
-先在受控设备上通过站点正常登录，分别建立浏览器配置目录：
+### 1. 初始化登录会话（首次使用或会话过期）
 
-- `browser_profiles/op7/`：OP7 正常登录配置
-- `browser_profiles/pingbo/`：Pingbo 正常登录配置
+选择单个平台：
+
+```bash
+python op7_fb_eb_pingbo_live_refresh.py --setup-session op7
+python op7_fb_eb_pingbo_live_refresh.py --setup-session pingbo
+```
+
+也可以依次初始化两个平台：
+
+```bash
+python op7_fb_eb_pingbo_live_refresh.py --setup-session both
+```
+
+程序会打开可见 Chromium 浏览器。请在浏览器内自行输入账号密码并完成验证码/MFA；登录成功并进入正常业务页面后，回到终端按 Enter。程序关闭浏览器时，Playwright 会将持久化会话保存在本机：
+
+- `browser_profiles/op7/`：OP7 会话
+- `browser_profiles/pingbo/`：Pingbo 会话
+
+程序不会读取、记录或上传密码、验证码、Cookie 或 Token。浏览器配置目录包含可复用的登录凭证，必须保留在受控本机，不能提交 Git、上传网盘或发给他人。
+
+### 2. 启动后台只读刷新
+
 
 启动只读刷新：
 
@@ -73,7 +93,7 @@ python op7_fb_eb_pingbo_live_refresh.py --config refresh_config.json --profiles-
 
 可以通过 `--fb-list-interval`、`--fb-odds-interval`、`--eb-list-interval`、`--eb-odds-interval`、`--pingbo-interval` 调整。所有间隔最小 5 秒，避免过度请求。
 
-## 三、输出
+## 三、登录失效处理\n\n- 后台请求收到 HTTP 401 或 403 时，会将对应数据集状态记为 `AUTH_REQUIRED`，停止刷新并提示重新执行对应平台的 `--setup-session` 命令。\n- 401/403 可能表示会话失效，也可能表示账号权限不足；请先在可见浏览器确认登录状态和账号权限。验证码/MFA/风控页面需要用户本人按站点流程处理，程序不会尝试绕过。\n- 其他网络错误仍记录为 `FAILED`，不会自动当作登录过期。\n\n## 四、输出
 
 程序只写入规范化的最新快照：
 
@@ -83,9 +103,9 @@ python op7_fb_eb_pingbo_live_refresh.py --config refresh_config.json --profiles-
 - `live_snapshots/EB_markets_latest.json`
 - `live_snapshots/Pingbo_events_latest.json`
 
-每个数据集同时写入 `<name>_status.json`。成功时记录 `SUCCESS` 与观测时间；失败时记录 `FAILED` 和错误信息。使用快照的下游程序必须同时检查状态与 `fetched_at_utc`，不能只因文件存在就认定数据实时。
+每个数据集同时写入 `<name>_status.json`。成功时记录 `SUCCESS` 与观测时间；一般失败记录 `FAILED`；遇到 HTTP 401/403 时记录 `AUTH_REQUIRED`。使用快照的下游程序必须同时检查状态与 `fetched_at_utc`，不能只因文件存在就认定数据实时。
 
-## 四、安全及边界
+## 五、安全及边界
 
 - 只允许 `api.738z3.com` 的 `getList/getMatchDetail`、`api.r4bud5u7.com` 的 `matchesPagePB/getMatchOddsInfoPB`、`www.part567.com` 的 `compact/events`。
 - 不会访问任何投注、下单、订单、钱包、充值、提现、cashout 或资金变更接口。
