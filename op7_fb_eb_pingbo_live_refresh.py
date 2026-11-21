@@ -125,6 +125,9 @@ def setup_session(site,profiles_dir):
    finally: ctx.close()
  print('登录初始化结束。可用 --live 启动后台只读刷新。')
 
+def report_auth_failure(error,args):
+ print(f'\\n检测到 {error.site.upper()} 返回 HTTP {error.status}。已停止刷新，请重新执行：python op7_fb_eb_pingbo_live_refresh.py --setup-session {error.site} --profiles-dir {args.profiles_dir}',file=sys.stderr)
+
 def main():
  ap=argparse.ArgumentParser(description='Read-only automatic refresh for OP7 FB/EB and Pingbo')
  ap.add_argument('--config',default='refresh_config.json'); ap.add_argument('--policy',default='refresh_policy.json'); ap.add_argument('--profiles-dir',default='browser_profiles')
@@ -182,9 +185,7 @@ def main():
      except Exception as e:
       save_failure(out,'FB_events',e); print(f'FB列表刷新失败：{type(e).__name__}: {e}',file=sys.stderr)
       if isinstance(e,AuthenticationRequired): auth_failure=e
-    if auth_failure:
-     print(f'\\n检测到 {auth_failure.site.upper()} 返回 HTTP {auth_failure.status}。已停止刷新，请重新执行：python op7_fb_eb_pingbo_live_refresh.py --setup-session {auth_failure.site} --profiles-dir {a.profiles_dir}',file=sys.stderr)
-     break
+    if auth_failure: report_auth_failure(auth_failure,a); break
     # EB list
     if tick-clocks['eb_list']>=a.eb_list_interval or not eb_list:
      try:
@@ -194,9 +195,7 @@ def main():
      except Exception as e:
       save_failure(out,'EB_events',e); print(f'EB列表刷新失败：{type(e).__name__}: {e}',file=sys.stderr)
       if isinstance(e,AuthenticationRequired): auth_failure=e
-    if auth_failure:
-         print(f'\n检测到 {auth_failure.site.upper()} 返回 HTTP {auth_failure.status}。已停止刷新，请重新执行：python op7_fb_eb_pingbo_live_refresh.py --setup-session {auth_failure.site} --profiles-dir {a.profiles_dir}',file=sys.stderr)
-         break
+    if auth_failure: report_auth_failure(auth_failure,a); break
     # Pingbo list + embedded markets
     if tick-clocks['pb']>=a.pingbo_interval or not pb_list:
      try:
@@ -210,7 +209,7 @@ def main():
      except Exception as e:
       save_failure(out,'Pingbo_events',e); print(f'Pingbo刷新失败：{type(e).__name__}: {e}',file=sys.stderr)
       if isinstance(e,AuthenticationRequired): auth_failure=e
-    if auth_failure: break
+    if auth_failure: report_auth_failure(auth_failure,a); break
     # FB event details / odds
     if tick-clocks['fb_odds']>=a.fb_odds_interval:
      rows=[]; failed_events=0
@@ -226,7 +225,7 @@ def main():
        if isinstance(e,AuthenticationRequired): auth_failure=e; break
      save_latest(out,'FB_markets',rows,'PARTIAL' if failed_events else 'SUCCESS',{'failed_events':failed_events}); clocks['fb_odds']=time.monotonic()
      print(f'[{now()}] FB盘口刷新：{len(rows)}组盘口')
-    if auth_failure: break
+    if auth_failure: report_auth_failure(auth_failure,a); break
     # EB event odds
     if tick-clocks['eb_odds']>=a.eb_odds_interval:
      rows=[]; failed_events=0
@@ -242,9 +241,7 @@ def main():
      for row in rows: row['observed_at_utc']=now()
      save_latest(out,'EB_markets',rows,'PARTIAL' if failed_events else 'SUCCESS',{'failed_events':failed_events}); clocks['eb_odds']=time.monotonic()
      print(f'[{now()}] EB盘口刷新：{len(rows)}组盘口')
-    if auth_failure:
-     print(f'\n检测到 {auth_failure.site.upper()} 返回 HTTP {auth_failure.status}。已停止刷新，请重新执行：python op7_fb_eb_pingbo_live_refresh.py --setup-session {auth_failure.site} --profiles-dir {a.profiles_dir}',file=sys.stderr)
-     break
+    if auth_failure: report_auth_failure(auth_failure,a); break
     time.sleep(0.5)
   finally:
    opctx.close(); pbctx.close()
