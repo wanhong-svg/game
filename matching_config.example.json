@@ -1,0 +1,47 @@
+{
+  "event_filter": {
+    "soccer_whitelist": ["EPL", "LaLiga", "SerieA", "Bundesliga", "Ligue1", "UCL"],
+    "basketball_whitelist": ["NBA", "KBL"],
+    "league_aliases": {
+      "NBA": ["NBA", "National Basketball Association"],
+      "KBL": ["KBL", "Korean Basketball League", "Korea Basketball League", "韩国篮球联赛", "韩国职业篮球联赛"]
+    }
+  },
+  "platforms": {
+    "PINNACLE": {
+      "provider": "part567",
+      "source": "Part567",
+      "settlement_scope": "UNKNOWN",
+      "market_aliases": {
+        "BASKETBALL_FT_HANDICAP": {"market_key": ["0"]},
+        "BASKETBALL_FT_TOTAL": {"market_key": ["1"]},
+        "BASKETBALL_FT_MONEYLINE": {"market_key": []}
+      }
+    },
+    "PANDA": {
+      "provider": "op7_eb",
+      "source": "OP7 EB",
+      "settlement_scope": "UNKNOWN",
+      "market_aliases": {
+        "BASKETBALL_FT_HANDICAP": {"play_id": [39], "mty": [3002]},
+        "BASKETBALL_FT_TOTAL": {"play_id": [38], "mty": [3003]},
+        "BASKETBALL_FT_MONEYLINE": {"play_id": [37], "mty": [3004]}
+      }
+    }
+  },
+  "matching": {
+    "event_time_tolerance_minutes": 5,
+    "odds_stale_seconds": 30,
+    "fx_stale_hours": 24,
+    "basketball_overtime_enabled": true
+  },
+  "settlement": {
+    "soccer": {"period": "FULL_TIME", "scope": "REGULATION_TIME"},
+    "basketball": {
+      "period": "FULL_TIME",
+      "scope": "FULL_GAME_INCLUDING_OT",
+      "include_overtime": true,
+      "overtime_points_counted": true
+    }
+  }
+}

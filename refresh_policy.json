@@ -1,0 +1,28 @@
+{
+  "mode": "read_only_auto_refresh",
+  "intervals_seconds": {
+    "FB_event_list": 30,
+    "FB_single_event_odds": 6,
+    "EB_event_list": 5,
+    "EB_single_event_odds": 5,
+    "Pingbo_event_list_and_embedded_odds": 20
+  },
+  "limits": {
+    "FB_events_per_odds_cycle": 8,
+    "EB_events_per_odds_cycle": 10,
+    "minimum_interval_seconds": 5
+  },
+  "evidence": {
+    "FB_event_list": "17 requests / 37.46s; gaps irregular; 30s is conservative initial setting, not a confirmed site cadence",
+    "FB_single_event_odds": "6 detail requests; median gap 3.84s; sample too small, 6s is provisional",
+    "EB_event_list": "53 matchesPagePB requests; median gap 4.41s",
+    "EB_single_event_odds": "21 repeated event IDs; per-mid median polling interval 5.0s",
+    "Pingbo_event_list_and_embedded_odds": "active cluster median gap 20.9s; later long gaps likely page inactivity/navigation"
+  },
+  "network_allowlist": {
+    "api.738z3.com": ["/v1/match/getList", "/v1/match/getMatchDetail"],
+    "api.r4bud5u7.com": ["/yewu11/v1/m/matchesPagePB", "/yewu11/v1/m/matchDetail/getMatchOddsInfoPB"],
+    "www.part567.com": ["/sports-service/sv/compact/events"]
+  },
+  "forbidden": ["bet submission", "order mutation", "wallet", "deposit", "withdrawal", "cashout", "account mutation"]
+}
