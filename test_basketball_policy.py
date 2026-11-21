@@ -2,7 +2,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from basketball_policy import load_config, normalize_rows, DEFAULT_CONFIG, EXPECTED_SETTLEMENT, event_time_delta_seconds, freshness_state, reverse_selection
+from basketball_policy import load_config, normalize_rows, DEFAULT_CONFIG, EXPECTED_SETTLEMENT, event_time_delta_seconds, freshness_state, reverse_selection, classify_market
 
 class BasketballPolicyTests(unittest.TestCase):
     def setUp(self):
@@ -64,6 +64,13 @@ class BasketballPolicyTests(unittest.TestCase):
         now = datetime.now(timezone.utc)
         state, _ = freshness_state((now - timedelta(seconds=60)).isoformat(), 30, now)
         self.assertEqual(state, "STALE")
+
+    def test_fb_market_requires_fulltime_phase(self):
+        cfg = json.loads(json.dumps(DEFAULT_CONFIG))
+        row = {"market_type_mty": 3002, "settlement_period_pe": 1002}
+        self.assertIsNone(classify_market(row, "FB", cfg))
+        row["settlement_period_pe"] = 3001
+        self.assertEqual(classify_market(row, "FB", cfg), "BASKETBALL_FT_HANDICAP")
 
 if __name__ == "__main__":
     unittest.main()
