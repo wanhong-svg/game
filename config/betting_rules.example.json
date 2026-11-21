@@ -1,0 +1,16 @@
+{
+  "enabled": true,
+  "allowed_plays": {
+    "独赢": true,
+    "让球": false,
+    "大小球": false,
+    "单双": false
+  },
+  "limits": {
+    "max_tickets_per_match_play": 1
+  },
+  "stake": {
+    "min": 50,
+    "max": 500
+  }
+}
