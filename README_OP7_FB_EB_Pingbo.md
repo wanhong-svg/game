@@ -83,6 +83,8 @@ python op7_fb_eb_pingbo_live_refresh.py --config refresh_config.json --profiles-
 - `live_snapshots/EB_markets_latest.json`
 - `live_snapshots/Pingbo_events_latest.json`
 
+每个数据集同时写入 `<name>_status.json`。成功时记录 `SUCCESS` 与观测时间；失败时记录 `FAILED` 和错误信息。使用快照的下游程序必须同时检查状态与 `fetched_at_utc`，不能只因文件存在就认定数据实时。
+
 ## 四、安全及边界
 
 - 只允许 `api.738z3.com` 的 `getList/getMatchDetail`、`api.r4bud5u7.com` 的 `matchesPagePB/getMatchOddsInfoPB`、`www.part567.com` 的 `compact/events`。
