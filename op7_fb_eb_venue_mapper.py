@@ -100,20 +100,24 @@ def event_summary(d,venue):
     if venue=='EB':
         phase=first(d,'mmp')
         return {'venue':'EB','event_id':first(d,'mid','id'),'league':first(d,'tnjc','leagueName'),
-          'sport':first(d,'csna','sportName'),'home':first(d,'mhn','homeTeamName'),'away':first(d,'man','awayTeamName'),
-          'start_time_ms':first(d,'mgt','startTime'),'raw_match_status':first(d,'mst','mstst','mststs','msts','mss'),
+          'sport':first(d,'csna','sportName'),'home':first(d,'mhn','homeName','homeTeamName'),
+          'away':first(d,'man','awayName','awayTeamName'),'start_time_ms':first(d,'mgt','startTime'),
+          'raw_match_status':first(d,'mst','mstst','mststs','msts','mss'),
           'phase_code_mmp':phase,'phase_text':EB_PHASE.get(as_int(phase),f'未知阶段({phase})' if phase is not None else None),
           'is_fulltime_by_mmp':as_int(phase) in EB_FULLTIME if phase is not None else None,'live_status':first(d,'lvs'),
           'market_group_count':len(d.get('hps',[]) or []),'raw_fields':sorted(d.keys())}
     mc=d.get('mc') if isinstance(d.get('mc'),dict) else {}; phase=first(mc,'pe'); ms=first(d,'ms')
     lg=d.get('lg') if isinstance(d.get('lg'),dict) else {}; nm=str(first(d,'nm') or '')
     teams=re.split(r'\s+vs\.?\s+',nm,maxsplit=1,flags=re.I)
-    home,away=(teams[0].strip(),teams[1].strip()) if len(teams)==2 else (None,None)
-    return {'venue':'FB','event_id':first(d,'id','mid'),'league':first(lg,'na','nm','name'),'event_name':nm,'home':home,'away':away,
-      'sport_type':first(d,'ty'),'start_time_ms':first(d,'bt'),'match_clock_or_elapsed':first(d,'tms'),
-      'raw_match_status_ms':ms,'match_status_text':FB_MATCH_STATUS.get(as_int(ms),f'未知({ms})'),
+    parsed_home,parsed_away=(teams[0].strip(),teams[1].strip()) if len(teams)==2 else (None,None)
+    # Prefer explicit source fields, then fall back to the event-name split.
+    home=first(d,'home','hn','homeName') or parsed_home
+    away=first(d,'away','an','awayName') or parsed_away
+    return {'venue':'FB','event_id':first(d,'id','mid'),'league':first(lg,'na','nm','name'),'event_name':nm,
+      'home':home,'away':away,'sport_type':first(d,'ty'),'start_time_ms':first(d,'bt','matchTime','startTime'),
+      'match_clock_or_elapsed':first(d,'tms'),'raw_match_status_ms':ms,
+      'match_status_text':FB_MATCH_STATUS.get(as_int(ms),f'未知({ms})'),
       'phase_code_mc_pe':phase,'phase_text':FB_PHASE.get(as_int(phase),f'未知阶段({phase})' if phase is not None else None),
-      'home':first(d,'home','hn','homeName'),'away':first(d,'away','an','awayName'),
       'market_group_count':len(d.get('mg',[]) or []),'raw_fields':sorted(d.keys())}
 
 def flatten_fb_markets(root,precision=2,event_id=None):
@@ -277,7 +281,7 @@ def time_intervals(entries):
         stats['Pingbo赛事列表+盘口']['active_cluster_gap_count']=len(active)
     return stats
 
-def process_har(path,precision=2):
+def process_har(path,precision=2,event_time_tolerance_minutes=5):
     har=json.loads(Path(path).read_text(encoding='utf-8')); counts=Counter(); endpoints=defaultdict(Counter); events={}; markets=[]; invalid=Counter(); pb_events=[]
     eb_event_status={}
     entries=har.get('log',{}).get('entries',[])
@@ -321,18 +325,27 @@ def process_har(path,precision=2):
     pb_events=list(pb_unique.values())
     pb_rows=[]
     for ev in pb_events: pb_rows.extend(flatten_pingbo_markets(ev))
-    # Cross-site event candidates by exact normalized team pair only; no market equivalence inferred.
+    # Candidate pairing requires exact normalized team pair AND comparable kickoff timestamps.
     cross=[]
     for venue in ('FB','EB'):
         for (_,eid),ev in [(k,v) for k,v in events.items() if k[0]==venue]:
             h,a=norm_team(ev.get('home')),norm_team(ev.get('away'))
-            if not h or not a: continue
+            t1=as_int(ev.get('start_time_ms'))
+            if not h or not a or t1 is None: continue
             for pe in pb_events:
                 ph,pa=norm_team(pe.get('home')),norm_team(pe.get('away'))
+                t2=as_int(pe.get('start_time_ms'))
+                if t2 is None: continue
+                delta=abs(t1-t2)
+                if delta > event_time_tolerance_minutes*60*1000: continue
                 if h==ph and a==pa: orient='same'
                 elif h==pa and a==ph: orient='reversed'
                 else: continue
-                cross.append({'venue_event':venue,'event_id':eid,'pingbo_event_id':pe['event_id'],'home':ev.get('home'),'away':ev.get('away'),'pingbo_home':pe.get('home'),'pingbo_away':pe.get('away'),'orientation':orient,'match_basis':'normalized exact team pair; market/settlement equivalence NOT established'})
+                cross.append({'venue_event':venue,'event_id':eid,'pingbo_event_id':pe['event_id'],
+                  'home':ev.get('home'),'away':ev.get('away'),'pingbo_home':pe.get('home'),'pingbo_away':pe.get('away'),
+                  'orientation':orient,'event_time_delta_seconds':round(delta/1000,2),
+                  'event_time_tolerance_minutes':event_time_tolerance_minutes,
+                  'match_basis':'normalized exact team pair + kickoff within configured tolerance; market/settlement equivalence NOT established'})
     return {'counts':dict(counts),'endpoints':{v:dict(c) for v,c in endpoints.items()},'events':[{'venue':k[0],**v} for k,v in events.items()],
       'markets':markets,'pingbo_events':[{k:v for k,v in e.items() if not k.startswith('_')} for e in pb_events],
       'pingbo_markets':pb_rows,'cross_venue_event_candidates':cross,'invalid_odds_counts':dict(invalid),
@@ -341,11 +354,13 @@ def process_har(path,precision=2):
 def main():
     ap=argparse.ArgumentParser(description='Offline OP7 FB/EB + Pingbo HAR mapper; no network or bet actions')
     ap.add_argument('--har',action='append',required=True,help='HAR file; repeat for multiple captures')
-    ap.add_argument('--precision',type=int,choices=[2,3],default=2); ap.add_argument('--json-out',default='op7_fb_eb_pingbo_analysis.json')
+    ap.add_argument('--precision',type=int,choices=[2,3],default=2); ap.add_argument('--event-time-tolerance-minutes',type=float,default=5); ap.add_argument('--json-out',default='op7_fb_eb_pingbo_analysis.json')
     ap.add_argument('--limit',type=int,default=30); ap.add_argument('--report',default='op7_fb_eb_pingbo_report.md')
-    a=ap.parse_args(); merged={'counts':Counter(),'endpoints':defaultdict(Counter),'events':{},'markets':{},'pingbo_events':{},'pingbo_markets':{},'cross':[],'invalid':Counter(),'refresh':defaultdict(list),'entry_count':0}
+    a=ap.parse_args();
+    if a.event_time_tolerance_minutes < 0: ap.error('--event-time-tolerance-minutes must be >= 0')
+    merged={'counts':Counter(),'endpoints':defaultdict(Counter),'events':{},'markets':{},'pingbo_events':{},'pingbo_markets':{},'cross':[],'invalid':Counter(),'refresh':defaultdict(list),'entry_count':0}
     for f in a.har:
-        result=process_har(f,a.precision); merged['entry_count']+=result['entry_count']
+        result=process_har(f,a.precision,a.event_time_tolerance_minutes); merged['entry_count']+=result['entry_count']
         merged['counts'].update(result['counts'])
         for v,paths in result['endpoints'].items(): merged['endpoints'][v].update(paths)
         for ev in result['events']: merged['events'][(ev['venue'],str(ev.get('event_id')))]=ev
@@ -357,7 +372,7 @@ def main():
     payload={'source_files':[Path(x).name for x in a.har],'entry_count':merged['entry_count'],'matched_requests':dict(merged['counts']),
       'endpoints':{v:dict(c) for v,c in merged['endpoints'].items()},'events':list(merged['events'].values()),'markets':list(merged['markets'].values()),
       'pingbo_events':list(merged['pingbo_events'].values()),'pingbo_markets':list(merged['pingbo_markets'].values()),
-      'cross_venue_event_candidates':merged['cross'],'invalid_odds_counts':dict(merged['invalid']),
+      'cross_venue_event_candidates':merged['cross'],'event_time_tolerance_minutes':a.event_time_tolerance_minutes,'invalid_odds_counts':dict(merged['invalid']),
       'refresh_intervals_by_capture':{k:v for k,v in merged['refresh'].items()},'phase_reference':{'FB_ms':FB_MATCH_STATUS,'FB_mc_pe':FB_PHASE,'EB_mmp':EB_PHASE,'EB_fulltime_mmp':sorted(EB_FULLTIME)},'play_mapping':PLAY_MAP,
       'limitations':['FB/EB and Pingbo event-name pairing is only a candidate; market/settlement equivalence is not proven.',
         'EB match overall lifecycle status remains raw where no confirmed enum exists.',
