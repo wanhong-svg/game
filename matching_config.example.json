@@ -12,6 +12,7 @@
       "provider": "part567",
       "source": "Part567",
       "settlement_scope": "UNKNOWN",
+      "market_period_verified": false,
       "market_aliases": {
         "BASKETBALL_FT_HANDICAP": {"market_key": ["0"]},
         "BASKETBALL_FT_TOTAL": {"market_key": ["1"]},
@@ -23,9 +24,9 @@
       "source": "OP7 EB",
       "settlement_scope": "UNKNOWN",
       "market_aliases": {
-        "BASKETBALL_FT_HANDICAP": {"play_id": [39], "mty": [3002]},
-        "BASKETBALL_FT_TOTAL": {"play_id": [38], "mty": [3003]},
-        "BASKETBALL_FT_MONEYLINE": {"play_id": [37], "mty": [3004]}
+        "BASKETBALL_FT_HANDICAP": {"play_id": [39], "mty": [3002], "period_pe": [3001]},
+        "BASKETBALL_FT_TOTAL": {"play_id": [38], "mty": [3003], "period_pe": [3001]},
+        "BASKETBALL_FT_MONEYLINE": {"play_id": [37], "mty": [3004], "period_pe": [3001]}
       }
     }
   },
