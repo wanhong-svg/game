@@ -247,15 +247,15 @@ def normalize_rows(payload, cfg):
             pair = next((c for c in payload.get("cross_venue_event_candidates", [])
                          if str(c.get("pingbo_event_id")) == str(row.get("event_id"))), None)
             orientation = pair.get("orientation") if pair else None
+        if orientation == "reversed" and market_type == "BASKETBALL_FT_HANDICAP":
+            raw_line = as_decimal(line)
+            if raw_line is not None:
+                line = str(-raw_line)
         for sel in selections:
             sel = dict(sel)
             if orientation == "reversed":
                 original = sel.get("selection", sel.get("selection_code"))
                 sel["selection"] = reverse_selection(original, market_type)
-                if market_type == "BASKETBALL_FT_HANDICAP":
-                    raw_line = as_decimal(line)
-                    if raw_line is not None:
-                        line = str(-raw_line)
             odds = as_decimal(sel.get("decimal_odds"))
             if odds is None or odds <= 1:
                 continue
