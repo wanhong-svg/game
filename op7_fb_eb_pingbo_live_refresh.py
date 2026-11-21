@@ -194,7 +194,9 @@ def main():
      except Exception as e:
       save_failure(out,'EB_events',e); print(f'EB列表刷新失败：{type(e).__name__}: {e}',file=sys.stderr)
       if isinstance(e,AuthenticationRequired): auth_failure=e
-    if auth_failure: break
+    if auth_failure:
+         print(f'\n检测到 {auth_failure.site.upper()} 返回 HTTP {auth_failure.status}。已停止刷新，请重新执行：python op7_fb_eb_pingbo_live_refresh.py --setup-session {auth_failure.site} --profiles-dir {a.profiles_dir}',file=sys.stderr)
+         break
     # Pingbo list + embedded markets
     if tick-clocks['pb']>=a.pingbo_interval or not pb_list:
      try:
