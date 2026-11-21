@@ -126,7 +126,7 @@ def setup_session(site,profiles_dir):
  print('登录初始化结束。可用 --live 启动后台只读刷新。')
 
 def report_auth_failure(error,args):
- print(f'\\n检测到 {error.site.upper()} 返回 HTTP {error.status}。已停止刷新，请重新执行：python op7_fb_eb_pingbo_live_refresh.py --setup-session {error.site} --profiles-dir {args.profiles_dir}',file=sys.stderr)
+ print(f'\n检测到 {error.site.upper()} 返回 HTTP {error.status}。已停止刷新，请重新执行：python op7_fb_eb_pingbo_live_refresh.py --setup-session {error.site} --profiles-dir {args.profiles_dir}',file=sys.stderr)
 
 def main():
  ap=argparse.ArgumentParser(description='Read-only automatic refresh for OP7 FB/EB and Pingbo')
