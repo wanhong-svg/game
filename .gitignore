@@ -5,3 +5,4 @@ venv/
 refresh_config.json
 browser_profiles/
 live_snapshots/
+config/betting_rules.json
