@@ -113,7 +113,8 @@ def setup_session(site,profiles_dir):
    ctx=p.chromium.launch_persistent_context(str(profile),headless=False,args=['--no-sandbox','--disable-dev-shm-usage'])
    try:
     page=ctx.pages[0] if ctx.pages else ctx.new_page()
-    page.goto(url,wait_until='domcontentloaded',timeout=30000)
+    try: page.goto(url,wait_until='domcontentloaded',timeout=30000)
+    except PlaywrightTimeoutError: print('页面加载等待超时；浏览器仍保持打开，请检查页面后继续手动登录。',file=sys.stderr)
     input(f'请确认 {label} 已成功登录并进入正常业务页面，然后回到终端按 Enter 保存本地会话；若未成功登录请不要按 Enter：')
     cookies=ctx.cookies()
     domains=[c.get('domain','') for c in cookies]
