@@ -43,9 +43,9 @@ DEFAULT_CONFIG = {
             "provider": "op7_eb", "source": "OP7 EB",
             "settlement_scope": "UNKNOWN",
             "market_aliases": {
-                "BASKETBALL_FT_HANDICAP": {"play_id": [39], "mty": [3002]},
-                "BASKETBALL_FT_TOTAL": {"play_id": [38], "mty": [3003]},
-                "BASKETBALL_FT_MONEYLINE": {"play_id": [37], "mty": [3004]}
+                "BASKETBALL_FT_HANDICAP": {"play_id": [39], "mty": [3002], "period_pe": [3001]},
+                "BASKETBALL_FT_TOTAL": {"play_id": [38], "mty": [3003], "period_pe": [3001]},
+                "BASKETBALL_FT_MONEYLINE": {"play_id": [37], "mty": [3004], "period_pe": [3001]}
             }
         }
     },
@@ -116,7 +116,8 @@ def classify_market(row, venue, cfg):
         if venue == "EB" and str(row.get("play_id_hpid")) in {str(x) for x in rule.get("play_id", [])}:
             return market_type
         if venue == "FB" and str(row.get("market_type_mty")) in {str(x) for x in rule.get("mty", [])}:
-            return market_type
+            if str(row.get("settlement_period_pe")) in {str(x) for x in rule.get("period_pe", [])}:
+                return market_type
     return None
 
 
@@ -222,12 +223,17 @@ def normalize_rows(payload, cfg):
             status, reason = "UNSUPPORTED_MARKET", "仅允许全场让分、全场大小分、全场独赢；未知或未配置玩法不猜测"
         else:
             settlement_state, settlement_reason = platform_settlement_state(p_cfg)
+            period_verified = (venue == "EB" or
+                               (venue == "FB" and str(row.get("settlement_period_pe")) == "3001") or
+                               (venue == "PINGBO" and p_cfg.get("market_period_verified") is True))
             if settlement_state == "MISMATCH":
                 status, reason = "SETTLEMENT_MISMATCH", settlement_reason
             elif settlement_state == "REVIEW":
                 status, reason = "NEEDS_REVIEW", settlement_reason
+            elif not period_verified:
+                status, reason = "NEEDS_REVIEW", "来源盘口所属比赛阶段未核实，不能确认是全场玩法"
             else:
-                status, reason = "ELIGIBLE", "赛事、玩法及包含加时结算口径符合配置；仍需通过赛事/盘口/赔率新鲜度校验"
+                status, reason = "ELIGIBLE", "赛事、全场玩法及包含加时结算口径符合配置；仍需通过赛事/赔率新鲜度校验"
 
         line = row.get("line", row.get("line_hv"))
         if venue == "PINGBO":
@@ -266,7 +272,7 @@ def normalize_rows(payload, cfg):
                 "home_team": ev.get("home"),
                 "away_team": ev.get("away"),
                 "market_type": market_type,\n                "event_orientation": orientation or "same_or_source_native",
-                "period": "FULL_TIME",
+                "period": "FULL_TIME",\n                "period_verified": (venue == "EB" or (venue == "FB" and str(row.get("settlement_period_pe")) == "3001") or (venue == "PINGBO" and p_cfg.get("market_period_verified") is True)),
                 "settlement_scope": EXPECTED_SETTLEMENT,
                 "include_overtime": True,
                 "overtime_points_counted": True,
