@@ -80,14 +80,14 @@ def eb_events(payload):
   if mid and home and away: out.append({'id':str(mid),'home':str(home),'away':str(away),'raw_status':x.get('mst'),'phase_mmp':x.get('mmp')})
  return out
 
-def save_latest(out,name,payload):
+def save_latest(out,name,payload,status='SUCCESS',details=None):
  out.mkdir(parents=True,exist_ok=True)
  stamp=now()
  p=out/(name+'_latest.json')
  tmp=p.with_suffix('.tmp')
- tmp.write_text(json.dumps({'status':'SUCCESS','fetched_at_utc':stamp,'data':payload},ensure_ascii=False,indent=2),encoding='utf-8')
+ tmp.write_text(json.dumps({'status':status,'fetched_at_utc':stamp,'data':payload,'details':details or {}},ensure_ascii=False,indent=2),encoding='utf-8')
  tmp.replace(p)
- (out/(name+'_status.json')).write_text(json.dumps({'status':'SUCCESS','observed_at_utc':stamp,'error':None},ensure_ascii=False,indent=2),encoding='utf-8')
+ (out/(name+'_status.json')).write_text(json.dumps({'status':status,'observed_at_utc':stamp,'details':details or {},'error':None},ensure_ascii=False,indent=2),encoding='utf-8')
 
 def save_failure(out,name,error):
  out.mkdir(parents=True,exist_ok=True)
@@ -164,7 +164,7 @@ def main():
      except Exception as e: save_failure(out,'Pingbo_events',e); print(f'Pingbo刷新失败：{type(e).__name__}: {e}',file=sys.stderr)
     # FB event details / odds
     if tick-clocks['fb_odds']>=a.fb_odds_interval:
-     rows=[]
+     rows=[]; failed_events=0
      for ev in fb_list[:max(0,a.fb_max_events)]:
       try:
        body=dict(fb_detail); body['matchId']=ev['id']
@@ -172,21 +172,21 @@ def main():
        d=data_of(res); markets,bad=mapper.flatten_fb_markets(d,2,ev['id'])
        for row in markets: row['observed_at_utc']=now()
        rows.extend(markets)
-      except Exception as e: print(f"FB赛事{ev.get('id')}盘口刷新失败：{type(e).__name__}",file=sys.stderr)
-     save_latest(out,'FB_markets',rows); clocks['fb_odds']=time.monotonic()
+      except Exception as e: failed_events+=1; print(f"FB赛事{ev.get('id')}盘口刷新失败：{type(e).__name__}",file=sys.stderr)
+     save_latest(out,'FB_markets',rows,'PARTIAL' if failed_events else 'SUCCESS',{'failed_events':failed_events}); clocks['fb_odds']=time.monotonic()
      print(f'[{now()}] FB盘口刷新：{len(rows)}组盘口')
     # EB event odds
     if tick-clocks['eb_odds']>=a.eb_odds_interval:
-     rows=[]
+     rows=[]; failed_events=0
      for ev in eb_list[:max(0,a.eb_max_events)]:
       try:
        q=dict(eb_q); q['mid']=ev['id']
        res=request_json(opctx,SITES['EB_ORIGIN']+'/yewu11/v1/m/matchDetail/getMatchOddsInfoPB','GET',oh,params=q,timeout_ms=a.timeout*1000)
        d=data_of(res); markets,bad=mapper.flatten_eb_markets(d,2,{})
        rows.extend(markets)
-      except Exception as e: print(f"EB赛事{ev.get('id')}盘口刷新失败：{type(e).__name__}",file=sys.stderr)
+      except Exception as e: failed_events+=1; print(f"EB赛事{ev.get('id')}盘口刷新失败：{type(e).__name__}",file=sys.stderr)
      for row in rows: row['observed_at_utc']=now()
-     save_latest(out,'EB_markets',rows); clocks['eb_odds']=time.monotonic()
+     save_latest(out,'EB_markets',rows,'PARTIAL' if failed_events else 'SUCCESS',{'failed_events':failed_events}); clocks['eb_odds']=time.monotonic()
      print(f'[{now()}] EB盘口刷新：{len(rows)}组盘口')
     time.sleep(0.5)
   finally:
