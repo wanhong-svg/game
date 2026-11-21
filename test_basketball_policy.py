@@ -2,7 +2,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from basketball_policy import load_config, normalize_rows, DEFAULT_CONFIG, EXPECTED_SETTLEMENT
+from basketball_policy import load_config, normalize_rows, DEFAULT_CONFIG, EXPECTED_SETTLEMENT, event_time_delta_seconds, freshness_state, reverse_selection, classify_market
 
 class BasketballPolicyTests(unittest.TestCase):
     def setUp(self):
@@ -25,11 +25,12 @@ class BasketballPolicyTests(unittest.TestCase):
         self.assertTrue(all(r["match_status"] == "NEEDS_REVIEW" for r in rows if r["market_type"]))
         self.assertTrue(all(r["include_overtime"] is True for r in rows if r["market_type"]))
 
-    def test_verified_including_ot_is_eligible(self):
+    def test_verified_including_ot_still_requires_fresh_observation(self):
         cfg = json.loads(json.dumps(DEFAULT_CONFIG))
         cfg["platforms"]["PANDA"]["settlement_scope"] = EXPECTED_SETTLEMENT
         rows = normalize_rows(self.payload, cfg)
-        self.assertEqual([r["match_status"] for r in rows if r["market_type"]], ["ELIGIBLE"] * 3)
+        self.assertEqual([r["match_status"] for r in rows if r["market_type"]], ["NEEDS_REVIEW"] * 3)
+        self.assertTrue(all(r["odds_freshness"] == "UNKNOWN" for r in rows if r["market_type"]))
 
     def test_excluding_ot_is_mismatch(self):
         cfg = json.loads(json.dumps(DEFAULT_CONFIG))
@@ -45,6 +46,31 @@ class BasketballPolicyTests(unittest.TestCase):
             p.write_text(json.dumps(cfg), encoding="utf-8")
             with self.assertRaises(ValueError):
                 load_config(p)
+
+    def test_event_time_tolerance_requires_both_timestamps(self):
+        self.assertEqual(event_time_delta_seconds(100000, 104000), 4)
+        self.assertIsNone(event_time_delta_seconds(100000, None))
+
+    def test_reversed_home_away_selection_is_swapped(self):
+        self.assertEqual(reverse_selection("home", "BASKETBALL_FT_MONEYLINE"), "away")
+        self.assertEqual(reverse_selection("over", "BASKETBALL_FT_TOTAL"), "over")
+
+    def test_missing_freshness_timestamp_is_unknown(self):
+        state, _ = freshness_state(None, 30)
+        self.assertEqual(state, "UNKNOWN")
+
+    def test_stale_freshness_timestamp_is_rejected(self):
+        from datetime import datetime, timezone, timedelta
+        now = datetime.now(timezone.utc)
+        state, _ = freshness_state((now - timedelta(seconds=60)).isoformat(), 30, now)
+        self.assertEqual(state, "STALE")
+
+    def test_fb_market_requires_fulltime_phase(self):
+        cfg = json.loads(json.dumps(DEFAULT_CONFIG))
+        row = {"market_type_mty": 3002, "settlement_period_pe": 1002}
+        self.assertIsNone(classify_market(row, "FB", cfg))
+        row["settlement_period_pe"] = 3001
+        self.assertEqual(classify_market(row, "FB", cfg), "BASKETBALL_FT_HANDICAP")
 
 if __name__ == "__main__":
     unittest.main()

@@ -22,7 +22,10 @@
 若来源确认不含加时，输出 `SETTLEMENT_MISMATCH`，不得参与同盘口匹配。`ELIGIBLE` 仅表示通过本政策资格检查，不等于跨平台已匹配，也不代表赔率、盘口状态和赛事时间校验已完成。
 
 ## 盘口映射说明
-- OP7 EB：篮球全场让分 `playId=39` / FB `mty=3002`；全场大小 `playId=38` / FB `mty=3003`；全场独赢 `playId=37` / FB `mty=3004`。
+- OP7 EB：篮球全场让分 `playId=39`；全场大小 `playId=38`；全场独赢 `playId=37`。这些映射来自当前仓库已记录的玩法表。
+- OP7 FB：除 `mty=3002/3003/3004` 外，还必须满足 `pe=3001`（全场阶段）；缺失或阶段不符时不纳入全场玩法。
+- 跨站赛事候选必须同时满足标准化主客队完全匹配、开赛时间两端均存在且差值不超过配置容差。若主客队顺序反转，结果必须保留 `orientation=reversed`；这仍只是赛事候选，不代表盘口已匹配。
+- Part567 当前只识别 key `0/1` 的已知盘口数组，但未确认其全场阶段及结算口径；默认 `market_period_verified=false`，因此不会因为玩法 key 对上就自动变成 `ELIGIBLE`。
 - Part567：已知 compact/events key `0` 为让分、key `1` 为大小分。独赢盘口的 key 与 tuple 字段布局必须从 HAR 原始数据核实后，填入 `BASKETBALL_FT_MONEYLINE.market_aliases.market_key`；程序不会猜测 key 或数组索引。
 
 ## 使用方法
@@ -42,7 +45,7 @@ python basketball_policy.py --analysis op7_fb_eb_pingbo_analysis.json \
 
 ## 其他既定阈值
 - 赛事开赛时间容差：5 分钟。
-- 赔率过期阈值：30 秒。
+- 赔率过期阈值：30 秒。分析数据必须带 `observed_at_utc`；缺失时间戳或超过阈值均为 `NEEDS_REVIEW`。
 - 汇率过期阈值：24 小时。
 - 足球白名单：EPL、LaLiga、SerieA、Bundesliga、Ligue1、UCL。
 

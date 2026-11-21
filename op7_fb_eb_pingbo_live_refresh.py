@@ -80,22 +80,35 @@ def eb_events(payload):
   if mid and home and away: out.append({'id':str(mid),'home':str(home),'away':str(away),'raw_status':x.get('mst'),'phase_mmp':x.get('mmp')})
  return out
 
-def save_latest(out,name,payload):
+def save_latest(out,name,payload,status='SUCCESS',details=None):
  out.mkdir(parents=True,exist_ok=True)
+ stamp=now()
  p=out/(name+'_latest.json')
  tmp=p.with_suffix('.tmp')
- tmp.write_text(json.dumps({'fetched_at_utc':now(),'data':payload},ensure_ascii=False,indent=2),encoding='utf-8')
+ tmp.write_text(json.dumps({'status':status,'fetched_at_utc':stamp,'data':payload,'details':details or {}},ensure_ascii=False,indent=2),encoding='utf-8')
  tmp.replace(p)
+ (out/(name+'_status.json')).write_text(json.dumps({'status':status,'observed_at_utc':stamp,'details':details or {},'error':None},ensure_ascii=False,indent=2),encoding='utf-8')
+
+def save_failure(out,name,error):
+ out.mkdir(parents=True,exist_ok=True)
+ (out/(name+'_status.json')).write_text(json.dumps({'status':'FAILED','failed_at_utc':now(),'error_type':type(error).__name__,'error':str(error)},ensure_ascii=False,indent=2),encoding='utf-8')
 
 def main():
  ap=argparse.ArgumentParser(description='Read-only automatic refresh for OP7 FB/EB and Pingbo')
- ap.add_argument('--config',default='refresh_config.example.json'); ap.add_argument('--profiles-dir',default='browser_profiles')
+ ap.add_argument('--config',default='refresh_config.json'); ap.add_argument('--policy',default='refresh_policy.json'); ap.add_argument('--profiles-dir',default='browser_profiles')
  ap.add_argument('--out',default='live_snapshots'); ap.add_argument('--live',action='store_true')
- ap.add_argument('--fb-list-interval',type=int,default=30); ap.add_argument('--fb-odds-interval',type=int,default=6)
- ap.add_argument('--eb-list-interval',type=int,default=5); ap.add_argument('--eb-odds-interval',type=int,default=5)
- ap.add_argument('--pingbo-interval',type=int,default=20); ap.add_argument('--fb-max-events',type=int,default=8); ap.add_argument('--eb-max-events',type=int,default=10)
+ ap.add_argument('--fb-list-interval',type=int); ap.add_argument('--fb-odds-interval',type=int)
+ ap.add_argument('--eb-list-interval',type=int); ap.add_argument('--eb-odds-interval',type=int)
+ ap.add_argument('--pingbo-interval',type=int); ap.add_argument('--fb-max-events',type=int,default=8); ap.add_argument('--eb-max-events',type=int,default=10)
  ap.add_argument('--timeout',type=int,default=15); ap.add_argument('--max-runtime',type=int,default=0)
  a=ap.parse_args()
+ policy=json.loads(Path(a.policy).read_text(encoding='utf-8'))
+ intervals=policy.get('intervals_seconds',{})
+ a.fb_list_interval=a.fb_list_interval or intervals.get('FB_event_list',30)
+ a.fb_odds_interval=a.fb_odds_interval or intervals.get('FB_single_event_odds',6)
+ a.eb_list_interval=a.eb_list_interval or intervals.get('EB_event_list',5)
+ a.eb_odds_interval=a.eb_odds_interval or intervals.get('EB_single_event_odds',5)
+ a.pingbo_interval=a.pingbo_interval or intervals.get('Pingbo_event_list_and_embedded_odds',20)
  vals=[a.fb_list_interval,a.fb_odds_interval,a.eb_list_interval,a.eb_odds_interval,a.pingbo_interval,a.timeout]
  if min(vals)<5: ap.error('刷新间隔及超时不得低于5秒')
  cfg=json.loads(Path(a.config).read_text(encoding='utf-8'))
@@ -130,14 +143,14 @@ def main():
       res=request_json(opctx,SITES['FB_ORIGIN']+'/v1/match/getList','POST',oh,body=fb_body,timeout_ms=a.timeout*1000)
       fb_list=fb_events(res); save_latest(out,'FB_events',fb_list); clocks['fb_list']=time.monotonic()
       print(f'[{now()}] FB赛事列表刷新：{len(fb_list)}场')
-     except Exception as e: print(f'FB列表刷新失败：{type(e).__name__}: {e}',file=sys.stderr)
+     except Exception as e: save_failure(out,'FB_events',e); print(f'FB列表刷新失败：{type(e).__name__}: {e}',file=sys.stderr)
     # EB list
     if tick-clocks['eb_list']>=a.eb_list_interval or not eb_list:
      try:
       res=request_json(opctx,SITES['EB_ORIGIN']+'/yewu11/v1/m/matchesPagePB','POST',oh,body=eb_body,timeout_ms=a.timeout*1000)
       eb_list=eb_events(res); save_latest(out,'EB_events',eb_list); clocks['eb_list']=time.monotonic()
       print(f'[{now()}] EB赛事列表刷新：{len(eb_list)}场')
-     except Exception as e: print(f'EB列表刷新失败：{type(e).__name__}: {e}',file=sys.stderr)
+     except Exception as e: save_failure(out,'EB_events',e); print(f'EB列表刷新失败：{type(e).__name__}: {e}',file=sys.stderr)
     # Pingbo list + embedded markets
     if tick-clocks['pb']>=a.pingbo_interval or not pb_list:
      try:
@@ -148,30 +161,32 @@ def main():
       pb_markets=[r for x in pb_list for r in mapper.flatten_pingbo_markets(x)]
       save_latest(out,'Pingbo_events',{'events':normalized,'markets':pb_markets}); clocks['pb']=time.monotonic()
       print(f'[{now()}] Pingbo赛事+内嵌盘口刷新：{len(pb_list)}场 / {len(pb_markets)}条盘口选项')
-     except Exception as e: print(f'Pingbo刷新失败：{type(e).__name__}: {e}',file=sys.stderr)
+     except Exception as e: save_failure(out,'Pingbo_events',e); print(f'Pingbo刷新失败：{type(e).__name__}: {e}',file=sys.stderr)
     # FB event details / odds
     if tick-clocks['fb_odds']>=a.fb_odds_interval:
-     rows=[]
+     rows=[]; failed_events=0
      for ev in fb_list[:max(0,a.fb_max_events)]:
       try:
        body=dict(fb_detail); body['matchId']=ev['id']
        res=request_json(opctx,SITES['FB_ORIGIN']+'/v1/match/getMatchDetail','POST',oh,body=body,timeout_ms=a.timeout*1000)
        d=data_of(res); markets,bad=mapper.flatten_fb_markets(d,2,ev['id'])
+       for row in markets: row['observed_at_utc']=now()
        rows.extend(markets)
-      except Exception as e: print(f"FB赛事{ev.get('id')}盘口刷新失败：{type(e).__name__}",file=sys.stderr)
-     save_latest(out,'FB_markets',rows); clocks['fb_odds']=time.monotonic()
+      except Exception as e: failed_events+=1; print(f"FB赛事{ev.get('id')}盘口刷新失败：{type(e).__name__}",file=sys.stderr)
+     save_latest(out,'FB_markets',rows,'PARTIAL' if failed_events else 'SUCCESS',{'failed_events':failed_events}); clocks['fb_odds']=time.monotonic()
      print(f'[{now()}] FB盘口刷新：{len(rows)}组盘口')
     # EB event odds
     if tick-clocks['eb_odds']>=a.eb_odds_interval:
-     rows=[]
+     rows=[]; failed_events=0
      for ev in eb_list[:max(0,a.eb_max_events)]:
       try:
        q=dict(eb_q); q['mid']=ev['id']
        res=request_json(opctx,SITES['EB_ORIGIN']+'/yewu11/v1/m/matchDetail/getMatchOddsInfoPB','GET',oh,params=q,timeout_ms=a.timeout*1000)
        d=data_of(res); markets,bad=mapper.flatten_eb_markets(d,2,{})
        rows.extend(markets)
-      except Exception as e: print(f"EB赛事{ev.get('id')}盘口刷新失败：{type(e).__name__}",file=sys.stderr)
-     save_latest(out,'EB_markets',rows); clocks['eb_odds']=time.monotonic()
+      except Exception as e: failed_events+=1; print(f"EB赛事{ev.get('id')}盘口刷新失败：{type(e).__name__}",file=sys.stderr)
+     for row in rows: row['observed_at_utc']=now()
+     save_latest(out,'EB_markets',rows,'PARTIAL' if failed_events else 'SUCCESS',{'failed_events':failed_events}); clocks['eb_odds']=time.monotonic()
      print(f'[{now()}] EB盘口刷新：{len(rows)}组盘口')
     time.sleep(0.5)
   finally:

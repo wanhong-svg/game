@@ -10,6 +10,7 @@ import json
 import re
 from pathlib import Path
 from decimal import Decimal, InvalidOperation
+from datetime import datetime, timezone
 
 ALLOWED_MARKETS = [
     "BASKETBALL_FT_HANDICAP",
@@ -42,9 +43,9 @@ DEFAULT_CONFIG = {
             "provider": "op7_eb", "source": "OP7 EB",
             "settlement_scope": "UNKNOWN",
             "market_aliases": {
-                "BASKETBALL_FT_HANDICAP": {"play_id": [39], "mty": [3002]},
-                "BASKETBALL_FT_TOTAL": {"play_id": [38], "mty": [3003]},
-                "BASKETBALL_FT_MONEYLINE": {"play_id": [37], "mty": [3004]}
+                "BASKETBALL_FT_HANDICAP": {"play_id": [39], "mty": [3002], "period_pe": [3001]},
+                "BASKETBALL_FT_TOTAL": {"play_id": [38], "mty": [3003], "period_pe": [3001]},
+                "BASKETBALL_FT_MONEYLINE": {"play_id": [37], "mty": [3004], "period_pe": [3001]}
             }
         }
     },
@@ -115,7 +116,8 @@ def classify_market(row, venue, cfg):
         if venue == "EB" and str(row.get("play_id_hpid")) in {str(x) for x in rule.get("play_id", [])}:
             return market_type
         if venue == "FB" and str(row.get("market_type_mty")) in {str(x) for x in rule.get("mty", [])}:
-            return market_type
+            if str(row.get("settlement_period_pe")) in {str(x) for x in rule.get("period_pe", [])}:
+                return market_type
     return None
 
 
@@ -137,6 +139,57 @@ def platform_settlement_state(platform_cfg):
     if actual in ("REGULATION_TIME", "FULL_GAME_EXCLUDING_OT", "EXCLUDING_OT"):
         return "MISMATCH", "来源结算口径不含加时，与本项目要求冲突"
     return "REVIEW", "来源全场盘口是否包含加时尚未核实"
+
+
+
+def event_time_delta_seconds(a, b):
+    """Return absolute kickoff delta in seconds; None means unverifiable."""
+    try:
+        return abs(int(a) - int(b)) / 1000
+    except (TypeError, ValueError):
+        return None
+
+
+def reverse_selection(selection, market_type):
+    """Normalize a reversed home/away pairing without guessing unknown labels."""
+    value = str(selection or "").strip().lower()
+    swaps = {"home": "away", "away": "home", "主": "客", "客": "主",
+             "主队": "客队", "客队": "主队", "1": "2", "2": "1"}
+    if market_type == "BASKETBALL_FT_HANDICAP":
+        return swaps.get(value, selection)
+    if market_type == "BASKETBALL_FT_MONEYLINE":
+        return swaps.get(value, selection)
+    return selection
+
+
+def freshness_state(observed_at, max_age_seconds, now=None):
+    if not observed_at:
+        return "UNKNOWN", "缺少来源观测时间，无法验证赔率新鲜度"
+    try:
+        stamp = datetime.fromisoformat(str(observed_at).replace("Z", "+00:00"))
+        current = now or datetime.now(timezone.utc)
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=timezone.utc)
+        age = (current - stamp).total_seconds()
+    except (TypeError, ValueError):
+        return "UNKNOWN", "来源观测时间格式无效"
+    if age < -5:
+        return "UNKNOWN", "来源观测时间晚于当前时间，时钟口径待核实"
+    if age > max_age_seconds:
+        return "STALE", f"来源数据已过期（{int(age)}秒）"
+    return "FRESH", "来源数据处于新鲜度阈值内"
+
+
+def event_pair_state(venue, event_id, pingbo_id, payload, cfg):
+    if venue == "PINGBO":
+        return "NOT_APPLICABLE", None
+    candidates = [c for c in payload.get("cross_venue_event_candidates", [])
+                  if c.get("venue_event") == venue
+                  and str(c.get("event_id")) == str(event_id)
+                  and str(c.get("pingbo_event_id")) == str(pingbo_id)]
+    if not candidates:
+        return "UNVERIFIED", "未找到同时满足球队与开赛时间容差的跨平台赛事候选"
+    return "VERIFIED_CANDIDATE", candidates[0]
 
 
 def normalize_rows(payload, cfg):
@@ -170,12 +223,17 @@ def normalize_rows(payload, cfg):
             status, reason = "UNSUPPORTED_MARKET", "仅允许全场让分、全场大小分、全场独赢；未知或未配置玩法不猜测"
         else:
             settlement_state, settlement_reason = platform_settlement_state(p_cfg)
+            period_verified = (venue == "EB" or
+                               (venue == "FB" and str(row.get("settlement_period_pe")) == "3001") or
+                               (venue == "PINGBO" and p_cfg.get("market_period_verified") is True))
             if settlement_state == "MISMATCH":
                 status, reason = "SETTLEMENT_MISMATCH", settlement_reason
             elif settlement_state == "REVIEW":
                 status, reason = "NEEDS_REVIEW", settlement_reason
+            elif not period_verified:
+                status, reason = "NEEDS_REVIEW", "来源盘口所属比赛阶段未核实，不能确认是全场玩法"
             else:
-                status, reason = "ELIGIBLE", "赛事、玩法及包含加时结算口径符合配置；仍需通过赛事/盘口/赔率新鲜度校验"
+                status, reason = "ELIGIBLE", "赛事、全场玩法及包含加时结算口径符合配置；仍需通过赛事/赔率新鲜度校验"
 
         line = row.get("line", row.get("line_hv"))
         if venue == "PINGBO":
@@ -184,10 +242,27 @@ def normalize_rows(payload, cfg):
         else:
             selections = row.get("selections", [])
 
+        orientation = None
+        if venue == "PINGBO":
+            pair = next((c for c in payload.get("cross_venue_event_candidates", [])
+                         if str(c.get("pingbo_event_id")) == str(row.get("event_id"))), None)
+            orientation = pair.get("orientation") if pair else None
+        if orientation == "reversed" and market_type == "BASKETBALL_FT_HANDICAP":
+            raw_line = as_decimal(line)
+            if raw_line is not None:
+                line = str(-raw_line)
         for sel in selections:
+            sel = dict(sel)
+            if orientation == "reversed":
+                original = sel.get("selection", sel.get("selection_code"))
+                sel["selection"] = reverse_selection(original, market_type)
             odds = as_decimal(sel.get("decimal_odds"))
             if odds is None or odds <= 1:
                 continue
+            freshness, freshness_reason = freshness_state(row.get("observed_at_utc"), cfg.get("matching", {}).get("odds_stale_seconds", 30))
+            final_status, final_reason = status, reason
+            if freshness != "FRESH" and status == "ELIGIBLE":
+                final_status, final_reason = "NEEDS_REVIEW", freshness_reason
             output.append({
                 "source": "Part567" if venue == "PINGBO" else "OP7 EB" if venue == "EB" else "OP7 FB",
                 "venue": venue,
@@ -197,7 +272,9 @@ def normalize_rows(payload, cfg):
                 "home_team": ev.get("home"),
                 "away_team": ev.get("away"),
                 "market_type": market_type,
+                "event_orientation": orientation or "same_or_source_native",
                 "period": "FULL_TIME",
+                "period_verified": (venue == "EB" or (venue == "FB" and str(row.get("settlement_period_pe")) == "3001") or (venue == "PINGBO" and p_cfg.get("market_period_verified") is True)),
                 "settlement_scope": EXPECTED_SETTLEMENT,
                 "include_overtime": True,
                 "overtime_points_counted": True,
@@ -208,8 +285,10 @@ def normalize_rows(payload, cfg):
                 "market_status": sel.get("common_market_status", row.get("common_market_status")),
                 "source_market_name": row.get("market_name", row.get("market_label")),
                 "source_selection_name": sel.get("selection"),
-                "match_status": status,
-                "reason": reason
+                "match_status": final_status,
+                "reason": final_reason,
+                "odds_freshness": freshness,
+                "observed_at_utc": row.get("observed_at_utc")
             })
     return output
 
@@ -241,7 +320,8 @@ def main():
             "ELIGIBLE means policy-qualified, not a confirmed cross-platform matched pair.",
             "A source remains NEEDS_REVIEW until its actual full-game including-overtime settlement is verified.",
             "Unknown aliases, unsupported markets and out-of-scope leagues are never guessed.",
-            "Event-time tolerance, odds freshness and FX freshness require comparable timestamps/rate snapshots; missing values remain unverified."
+            "Event-time tolerance is enforced by the HAR mapper; candidates still require manual market/settlement equivalence review.",
+            "Odds freshness remains unverified unless a source observation timestamp is present; missing timestamps are not treated as fresh."
         ]
     }
     Path(args.out).write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
