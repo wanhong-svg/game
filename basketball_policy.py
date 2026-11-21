@@ -253,6 +253,10 @@ def normalize_rows(payload, cfg):
             odds = as_decimal(sel.get("decimal_odds"))
             if odds is None or odds <= 1:
                 continue
+            freshness, freshness_reason = freshness_state(row.get("observed_at_utc"), cfg.get("matching", {}).get("odds_stale_seconds", 30))
+            final_status, final_reason = status, reason
+            if freshness != "FRESH" and status == "ELIGIBLE":
+                final_status, final_reason = "NEEDS_REVIEW", freshness_reason
             output.append({
                 "source": "Part567" if venue == "PINGBO" else "OP7 EB" if venue == "EB" else "OP7 FB",
                 "venue": venue,
@@ -273,8 +277,10 @@ def normalize_rows(payload, cfg):
                 "market_status": sel.get("common_market_status", row.get("common_market_status")),
                 "source_market_name": row.get("market_name", row.get("market_label")),
                 "source_selection_name": sel.get("selection"),
-                "match_status": status,
-                "reason": reason
+                "match_status": final_status,
+                "reason": final_reason,
+                "odds_freshness": freshness,
+                "observed_at_utc": row.get("observed_at_utc")
             })
     return output
 
