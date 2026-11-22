@@ -137,12 +137,26 @@ def _selected_state(element) -> bool | None:
     return None
 
 
-def _is_eb_visually_selected(element) -> bool:
-    """Recognize EB's blue selected pill from the user-provided OP/EB references.
+def _element_blue_ratio(element) -> float:
+    """Return the fraction of an element screenshot occupied by saturated blue."""
+    if Image is None:
+        raise RuntimeError(
+            "视觉状态确认需要 Pillow；请先执行：python3 -m pip install Pillow"
+        )
+    screenshot = Image.open(io.BytesIO(element.screenshot_as_png)).convert("RGB")
+    width, height = screenshot.size
+    if width < 8 or height < 8:
+        raise RuntimeError(f"控件截图尺寸异常：{width}x{height}")
+    pixels = list(screenshot.getdata())
+    blue = sum(
+        1 for r, g, b in pixels
+        if b >= 125 and b - r >= 45 and b - g >= 12 and max(r, g, b) - min(r, g, b) >= 45
+    )
+    return blue / max(len(pixels), 1)
 
-    The clickable EB element is captured independently, so sampling is relative
-    to its bounds and does not depend on device screenshot resolution or offsets.
-    """
+
+def _is_eb_visually_selected(element) -> bool:
+    """Recognize EB's blue selected pill from the user-provided OP/EB references."""
     if Image is None:
         raise RuntimeError(
             "EB 视觉确认需要 Pillow；请先执行：python3 -m pip install Pillow"
@@ -163,16 +177,23 @@ def _is_eb_visually_selected(element) -> bool:
 
 
 def _is_selected(driver, label: str, element) -> bool | None:
-    # EB has no selected/checked accessibility flag. Use the supplied visual
-    # reference pair: selected EB = blue pill with white text; inactive EB = white
-    # pill with dark text.
+    # The bottom navigation and EB channel tabs use blue for their active state.
+    # Accessibility selected=false is not authoritative for these custom controls.
     if label == "EB":
         return _is_eb_visually_selected(element)
+    if label == "体育":
+        ratio = _element_blue_ratio(element)
+        print(f"「体育」选中视觉检测：蓝色像素占比 {ratio:.1%}。")
+        return ratio >= 0.015
     return _selected_state(element)
 
 
 def ensure_selected(driver, label: str, wait: float = 1.5) -> None:
-    """Select a navigation tab, wait for rendering, then verify its active state."""
+    """Select a navigation tab, wait for rendering, then verify its active state.
+
+    EB and the bottom 体育 tab are custom controls whose accessibility
+    selected/checked flags do not reflect the visible active styling.
+    """
     element = _control_by_label(driver, label)
     state = _is_selected(driver, label, element)
     if state is True:
