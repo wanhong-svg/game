@@ -51,20 +51,19 @@ adb devices -l
 curl http://127.0.0.1:4723/status
 ```
 
-然后配置 Pingbo 登录入口（不要把带个人令牌/会话参数的 URL 写进仓库）：
+启动程序后，终端会主动询问 Pingbo 网站地址，不需要预先写入配置文件或仓库：
 
 ```bash
-export PINGBO_URL='https://请填写实际Pingbo登录入口'
 python3 scripts/dual_platform_monitor.py
 ```
 
-也可直接传入：
+终端交互示例：
 
-```bash
-python3 scripts/dual_platform_monitor.py --pingbo-url 'https://实际登录入口'
+```text
+请输入 Pingbo 网站地址（登录入口 URL）：https://你的Pingbo登录入口
 ```
 
-程序会连接 OP7、打开 Pingbo 浏览器，输出两端登录状态提示。请手动登录两端，确认成功后在终端按 Enter。
+也支持可选参数 `--pingbo-url` 或环境变量 `PINGBO_URL`，但默认流程是在命令行现场输入。程序会连接 OP7、打开 Pingbo 浏览器，输出两端登录状态提示。请手动登录两端，确认成功后在终端按 Enter。
 
 ## 尚未接入真实环境的部分
 
