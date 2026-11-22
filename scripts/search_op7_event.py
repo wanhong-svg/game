@@ -432,9 +432,11 @@ def main() -> int:
             )
         print(f"搜索框内容校验通过：{actual_value!r}")
         if args.submit == "enter":
-            search_button = _control_by_label(driver, "搜索")
-            search_button.click()
-            print("已点击页面「搜索」按钮。")
+            # The search sheet exposes two controls labelled 搜索 (tab title and
+            # submit action). Avoid ambiguous XPath selection and submit from the
+            # focused search field using the keyboard Enter action.
+            field.send_keys(Keys.ENTER)
+            print("已在搜索输入框发送 Enter，执行搜索。")
         else:
             print("Query left in the search field; not submitted.")
 
