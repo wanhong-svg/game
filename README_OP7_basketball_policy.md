@@ -3,7 +3,7 @@
 ## 适用范围
 - Pinnacle：Part567（Pingbo）数据适配。
 - Panda：OP7 EB（wire 标识 OB；程序显示 EB）数据适配。
-- 赛事白名单：NBA、KBL。
+- 赛事白名单：法国女子篮球联赛（LFB / Wonderligue）。
 - 允许的全场盘口：
   - `BASKETBALL_FT_HANDICAP`：全场让分，包含加时赛。
   - `BASKETBALL_FT_TOTAL`：全场大小分，包含加时赛。
