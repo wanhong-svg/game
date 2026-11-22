@@ -161,6 +161,20 @@ python3 scripts/capture_op7_network.py --duration 90 --output /tmp/op7-events.pc
 
 模块提供纯解析函数和基于 Appium accessibility label 的精确定位辅助函数。赛事搜索结果按联赛与主客队唯一定位后，直接调用对应 UI 元素的 click；盘口选项也按完整 accessibility label 定位。整个流程不使用固定屏幕坐标或固定 adb tap；点击盘口选项只用于打开注单面板做二次读取；**不会填写金额，不会点击“投注”，不提交订单**。如果界面控件没有可唯一识别的 accessibility label，程序会失败关闭，不会退回固定坐标。
 
+读取当前赛事详情页的三类全场盘口：
+
+```bash
+python3 scripts/inspect_op7_markets.py
+```
+
+按精确盘口线打开一个选项的注单审核面板并核验（例如主队 +12.5）：
+
+```bash
+python3 scripts/inspect_op7_markets.py --market-type FULL_TIME_HANDICAP --selection 主 --line +12.5 --open-slip
+```
+
+该命令只点击匹配到的盘口控件以打开审核面板，随后核对联赛、球队、比分、玩法、方向、盘口线和赔率；不会输入金额，也不会点击“投注”。如盘口控件或注单字段不唯一/不完整，会停止并报错。
+
 运行离线单元测试：
 
 ```bash
