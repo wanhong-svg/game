@@ -2,10 +2,13 @@
 from __future__ import annotations
 
 import os
+import shutil
+import subprocess
+import time
 from dataclasses import dataclass
 from typing import Any
 
-from android.appium_session import create_driver, close_driver
+from android.appium_session import create_driver, close_driver, DEFAULT_UDID
 
 
 @dataclass
@@ -29,6 +32,33 @@ class DualSession:
                     self.playwright.stop()
 
 
+def ensure_android_device() -> None:
+    """Use an already-running emulator, or launch the explicitly configured AVD."""
+    udid = os.getenv("ANDROID_UDID", DEFAULT_UDID)
+    adb = shutil.which("adb")
+    if not adb:
+        raise RuntimeError("找不到 adb；请安装 Android Platform Tools 并加入 PATH")
+    def connected() -> bool:
+        result = subprocess.run([adb, "devices"], capture_output=True, text=True, check=False)
+        return any(line.split()[0] == udid and len(line.split()) > 1 and line.split()[1] == "device"
+                   for line in result.stdout.splitlines()[1:] if line.split())
+    if connected():
+        return
+    avd_name = os.getenv("ANDROID_AVD_NAME")
+    emulator = shutil.which("emulator")
+    if not avd_name or not emulator:
+        raise RuntimeError(
+            f"Android 设备 {udid} 未运行。请先启动该模拟器；如需脚本启动，请设置 ANDROID_AVD_NAME。"
+        )
+    subprocess.Popen([emulator, "-avd", avd_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    deadline = time.monotonic() + 180
+    while time.monotonic() < deadline:
+        if connected():
+            return
+        time.sleep(2)
+    raise TimeoutError(f"等待 Android 模拟器 {udid} 启动超时")
+
+
 def launch_dual_sessions(pingbo_url: str | None = None, *, headless: bool = False) -> DualSession:
     """Connect to the running Android emulator and launch a visible Pingbo browser."""
     url = pingbo_url or os.getenv("PINGBO_URL")
@@ -36,6 +66,7 @@ def launch_dual_sessions(pingbo_url: str | None = None, *, headless: bool = Fals
         raise ValueError("请先设置 PINGBO_URL，或通过 --pingbo-url 指定 Pingbo 登录入口")
     from playwright.sync_api import sync_playwright
 
+    ensure_android_device()
     driver = create_driver(no_reset=True)
     playwright = sync_playwright().start()
     try:
