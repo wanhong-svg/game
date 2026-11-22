@@ -9,7 +9,12 @@
 - `op7_fb_eb_pingbo_analysis.json`：本次两份 HAR 的脱敏联合解析结果。
 - `op7_fb_eb_pingbo_report.md`：字段完善及刷新频率分析报告。
 
-## 平博页面入口\n\n- 平博 PC 页面：`https://www.pin135.com/`。\n- 当前只读刷新器将此地址作为可见浏览器登录入口。赛事读取 API 仍沿用仓库既有 HAR 中确认的 `www.part567.com` 接口；不能仅凭页面域名推断 API 域名。首次验证 pin135 页面后，应重新导出 HAR，核对实际赛事列表接口、请求头与参数，再更新只读白名单。\n\n## 一、离线抓包分析
+## 平博页面入口
+
+- 平博 PC 页面：`https://www.pin135.com/`。
+- 当前只读刷新器将此地址作为可见浏览器登录入口。赛事读取 API 仍沿用仓库既有 HAR 中确认的 `www.part567.com` 接口；不能仅凭页面域名推断 API 域名。首次验证 pin135 页面后，应重新导出 HAR，核对实际赛事列表接口、请求头与参数，再更新只读白名单。
+
+## 一、离线抓包分析
 
 ```bash
 python op7_fb_eb_venue_mapper.py \
@@ -93,7 +98,13 @@ python op7_fb_eb_pingbo_live_refresh.py --config refresh_config.json --profiles-
 
 可以通过 `--fb-list-interval`、`--fb-odds-interval`、`--eb-list-interval`、`--eb-odds-interval`、`--pingbo-interval` 调整。所有间隔最小 5 秒，避免过度请求。
 
-## 三、登录失效处理\n\n- 后台请求收到 HTTP 401 或 403 时，会将对应数据集状态记为 `AUTH_REQUIRED`，停止刷新并提示重新执行对应平台的 `--setup-session` 命令。\n- 401/403 可能表示会话失效，也可能表示账号权限不足；请先在可见浏览器确认登录状态和账号权限。验证码/MFA/风控页面需要用户本人按站点流程处理，程序不会尝试绕过。\n- 其他网络错误仍记录为 `FAILED`，不会自动当作登录过期。\n\n## 四、输出
+## 三、登录失效处理
+
+- 后台请求收到 HTTP 401 或 403 时，会将对应数据集状态记为 `AUTH_REQUIRED`，停止刷新并提示重新执行对应平台的 `--setup-session` 命令。
+- 401/403 可能表示会话失效，也可能表示账号权限不足；请先在可见浏览器确认登录状态和账号权限。验证码/MFA/风控页面需要用户本人按站点流程处理，程序不会尝试绕过。
+- 其他网络错误仍记录为 `FAILED`，不会自动当作登录过期。
+
+## 四、输出
 
 程序只写入规范化的最新快照：
 
