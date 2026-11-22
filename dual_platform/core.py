@@ -31,6 +31,28 @@ def normalize_name(value: object) -> str:
     return "".join(ch for ch in value if ch.isalnum())
 
 
+def normalize_line(value: object, orientation: str = "SAME", market_type: str = "") -> str:
+    raw = str(value or "").strip().replace("−", "-").replace("＋", "+")
+    try:
+        number = Decimal(raw)
+        if orientation == "REVERSED" and market_type == "FULL_TIME_HANDICAP":
+            number = -number
+        return format(number.normalize(), "f")
+    except (InvalidOperation, ValueError):
+        return raw.casefold()
+
+
+def canonical_selection(value: object, orientation: str = "SAME", market_type: str = "") -> str:
+    raw = str(value or "").strip().casefold()
+    if orientation != "REVERSED" or market_type not in {"FULL_TIME_MONEYLINE", "FULL_TIME_HANDICAP"}:
+        return normalize_name(raw)
+    swaps = {
+        "home": "away", "away": "home", "主": "客", "客": "主",
+        "主队": "客队", "客队": "主队", "1": "2", "2": "1",
+    }
+    return normalize_name(swaps.get(raw, raw))
+
+
 def decimal_value(value: object) -> Optional[Decimal]:
     try:
         result = Decimal(str(value))
