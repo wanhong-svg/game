@@ -69,7 +69,7 @@ def _parse_option(desc: str, current_market: str,
     label = without_probability[:odds_match.start()].strip()
     label = re.sub(r"\\s+", " ", label).strip()
     selection_match = re.fullmatch(
-        r"(主队?|客队?|主|客|大|小|Over|Under)\s*([+\-−＋]?\s*\d+(?:\.\d+)?)?",
+        r"(主队?|客队?|主|客|大|小|Over|Under)\s*([+\-−＋]?\s*\d+(?:\.\d+)?(?:/\d+(?:\.\d+)?)?)?",
         label, re.I
     )
     if not selection_match:
