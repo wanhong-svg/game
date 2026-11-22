@@ -411,9 +411,9 @@ def main() -> int:
             field.clear()
         except Exception:
             pass
-        # Use UiAutomator2's direct element value setter instead of typing through
-        # the active Chinese IME, which can leave composing/garbled characters.
-        field.set_value(query)
+        # Selenium/Appium WebElement does not implement set_value().
+        # Use the supported send_keys API, then verify the exact text before submit.
+        field.send_keys(query)
         actual_value = field.get_attribute("text") or ""
         if actual_value != query:
             raise RuntimeError(
@@ -444,19 +444,22 @@ def main() -> int:
                 break
             time.sleep(min(args.poll_interval, max(0, deadline - time.monotonic())))
 
-        if result_state == "results":
-            print(f"已检测到赛事结果：{len(events)} 条。")
-        elif result_state == "empty":
-            print("页面提示「暂无搜索结果」。")
-        else:
+        if result_state == "empty":
+            print("未找到赛事信息：页面提示「暂无搜索结果」。")
+            print("保持当前搜索页面，不执行联赛筛选，也不返回主页。")
+            return 3
+        if result_state != "results":
             raise TimeoutError(
                 f"等待 {args.wait:.1f}s 后，既未检测到赛事结果，也未检测到「暂无搜索结果」。"
             )
+
+        print(f"已检测到赛事结果：{len(events)} 条。")
         print(f"Search finished; activity={driver.current_activity}")
         print(f"Parsed search results: {len(events)}")
         for index, event in enumerate(events, 1):
             print(f"[{index}] league={event.league} | {event.home} VS {event.away} | "
                   f"period={event.period or '-'} | clock={event.clock or '-'}")
+        # 联赛筛选只允许在已经出现赛事搜索结果后执行；空结果已在上方原地结束。
         selectors = (args.league, args.home, args.away)
         if any(selectors) and not all(selectors):
             print("--league、--home、--away 必须同时提供。", file=sys.stderr)
