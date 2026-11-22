@@ -37,7 +37,14 @@ python3 -m pip install -r requirements-dual-platform.txt
 python3 -m playwright install chromium
 ```
 
-先启动 Android 模拟器及 Appium Server，确认：
+先启动 Appium Server。Android 模拟器可提前手动启动；也可配置 AVD 名称，由脚本尝试启动：
+
+```bash
+export ANDROID_AVD_NAME='你的AVD名称'
+export ANDROID_UDID='emulator-5554'
+```
+
+确认 Android Platform Tools 与 Appium Server 可用：
 
 ```bash
 adb devices -l
