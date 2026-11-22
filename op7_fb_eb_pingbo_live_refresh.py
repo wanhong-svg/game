@@ -118,7 +118,7 @@ def setup_session(site,profiles_dir):
     input(f'请确认 {label} 已成功登录并进入正常业务页面，然后回到终端按 Enter 保存本地会话；若未成功登录请不要按 Enter：')
     cookies=ctx.cookies()
     domains=[c.get('domain','') for c in cookies]
-    relevant=[d for d in domains if ('op7.io' in d or '738z3.com' in d or 'r4bud5u7.com' in d)] if key=='op7' else [d for d in domains if ('pin135.com' in d or 'pin135.com' in d)]
+    relevant=[d for d in domains if ('op7.io' in d or '738z3.com' in d or 'r4bud5u7.com' in d)] if key=='op7' else [d for d in domains if ('pin135.com' in d)]
     print(f'{label}：浏览器配置已保存在 {profile}。当前 Cookie 数量 {len(cookies)}，相关域 Cookie 数量 {len(relevant)}。')
     if not relevant:
      print('警告：未发现相关域 Cookie；若站点使用其他存储方式，会话仍可能已保存。请用后台刷新验证，若返回 401/403 请重新登录。')
