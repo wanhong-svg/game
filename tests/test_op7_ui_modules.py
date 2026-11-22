@@ -22,6 +22,7 @@ class Op7UiModuleTests(unittest.TestCase):
         </hierarchy>"""
         events = parse_search_results(xml)
         self.assertEqual(len(events), 2)
+        self.assertIsNone(events[1].home_score)  # 11-22 is a kickoff date, not a score.
         selected = find_unique_search_result(events, league="NBA",
                     home="萨克拉门托国王", away="波士顿凯尔特人")
         self.assertEqual(selected.league, "NBA")
@@ -88,6 +89,27 @@ class Op7UiModuleTests(unittest.TestCase):
         ]
         self.assertEqual(find_unique_option(options, market_type="FULL_TIME_HANDICAP",
                                             selection="主", line="+12.5").odds, "0.88")
+
+    def test_slip_verifier_supports_moneyline_and_total(self):
+        moneyline_xml = """<hierarchy>
+          <node content-desc="全场独赢" /><node content-desc="NBA" />
+          <node content-desc="1.25" />
+          <node content-desc="(30:37) 波士顿凯尔特人" />
+          <node content-desc="萨克拉门托国王 VS 波士顿凯尔特人" />
+        </hierarchy>"""
+        moneyline = read_selection_slip(moneyline_xml)
+        verify_selection(ExpectedSelection("NBA", "萨克拉门托国王", "波士顿凯尔特人",
+                         "全场独赢", "客", "", "1.25"), moneyline)
+
+        total_xml = """<hierarchy>
+          <node content-desc="全场大小" /><node content-desc="NBA" />
+          <node content-desc="1.87" />
+          <node content-desc="(30:37) 大 208.5" />
+          <node content-desc="萨克拉门托国王 VS 波士顿凯尔特人" />
+        </hierarchy>"""
+        total = read_selection_slip(total_xml)
+        verify_selection(ExpectedSelection("NBA", "萨克拉门托国王", "波士顿凯尔特人",
+                         "全场大小", "大", "208.5", "1.87"), total)
 
     def test_slip_verification_rejects_wrong_line(self):
         expected = ExpectedSelection("NBA", "萨克拉门托国王", "波士顿凯尔特人",
