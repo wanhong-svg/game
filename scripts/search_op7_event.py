@@ -244,7 +244,12 @@ def main() -> int:
     parser.add_argument("--package", default=DEFAULT_PACKAGE)
     parser.add_argument("--search-field-id", help="Exact Android resource-id of the search input")
     parser.add_argument("--search-trigger-id", help="Exact resource-id of the search icon/button, if it first opens the input")
-    parser.add_argument("--wait", type=float, default=2, help="Seconds to wait after search submission")
+    parser.add_argument("--wait", type=float, default=30,
+                        help="Maximum seconds to wait for search results or the empty-result message (default: 30)")
+    parser.add_argument("--poll-interval", type=float, default=0.5,
+                        help="Seconds between search-result checks (default: 0.5)")
+    parser.add_argument("--detail-wait", type=float, default=2,
+                        help="Seconds to wait after opening a matched event detail (default: 2)")
     parser.add_argument("--setup-wait", type=float, default=1.5,
                         help="Seconds to wait after each initial navigation step (default: 1.5)")
     parser.add_argument("--league", help="Exact competition label used to select a result")
@@ -255,8 +260,12 @@ def main() -> int:
     args = parser.parse_args()
     if not args.event.strip():
         parser.error("--event cannot be blank")
-    if args.wait < 0:
-        parser.error("--wait must be >= 0")
+    if args.wait <= 0:
+        parser.error("--wait must be > 0")
+    if args.poll_interval <= 0:
+        parser.error("--poll-interval must be > 0")
+    if args.detail_wait < 0:
+        parser.error("--detail-wait must be >= 0")
     if args.setup_wait < 0:
         parser.error("--setup-wait must be >= 0")
 
@@ -307,21 +316,54 @@ def main() -> int:
                     return 2
                 field = visible_fields[0]
 
+        query = args.event.strip()
         field.click()
         try:
             field.clear()
         except Exception:
             pass
-        field.send_keys(args.event.strip())
-        print(f"Query entered: {args.event.strip()}")
+        # Use UiAutomator2's direct element value setter instead of typing through
+        # the active Chinese IME, which can leave composing/garbled characters.
+        field.set_value(query)
+        actual_value = field.get_attribute("text") or ""
+        if actual_value != query:
+            raise RuntimeError(
+                f"搜索框输入校验失败：期望 {query!r}，实际 {actual_value!r}；"
+                "已停止提交，避免使用含异常字符的搜索词。"
+            )
+        print(f"搜索框内容校验通过：{actual_value!r}")
         if args.submit == "enter":
-            field.send_keys(Keys.ENTER)
-            print("Search submitted with Enter.")
+            search_button = _control_by_label(driver, "搜索")
+            search_button.click()
+            print("已点击页面「搜索」按钮。")
         else:
             print("Query left in the search field; not submitted.")
-        time.sleep(args.wait)
-        print(f"Search finished waiting; activity={driver.current_activity}")
-        events = parse_search_results(driver.page_source)
+
+        # Wait for either parsed event rows or the explicit empty-result state.
+        deadline = time.monotonic() + args.wait
+        events = []
+        result_state = None
+        while time.monotonic() < deadline:
+            source = driver.page_source
+            events = parse_search_results(source)
+            normalized_source = " ".join(source.replace("\\n", " ").split())
+            if events:
+                result_state = "results"
+                break
+            if "暂无搜索结果" in normalized_source:
+                result_state = "empty"
+                break
+            time.sleep(min(args.poll_interval, max(0, deadline - time.monotonic())))
+
+        if result_state == "results":
+            print(f"已检测到赛事结果：{len(events)} 条。")
+        elif result_state == "empty":
+            print("页面提示「暂无搜索结果」。")
+        else:
+            raise TimeoutError(
+                f"等待 {args.wait:.1f}s 后，既未检测到赛事结果，也未检测到「暂无搜索结果」。"
+            )
+        print(f"Search finished; activity={driver.current_activity}")
         print(f"Parsed search results: {len(events)}")
         for index, event in enumerate(events, 1):
             print(f"[{index}] league={event.league} | {event.home} VS {event.away} | "
@@ -341,7 +383,7 @@ def main() -> int:
             if len(matches) != 1:
                 raise ValueError(f"目标赛事行匹配到 {len(matches)} 个控件，拒绝点击")
             matches[0].click()
-            time.sleep(args.wait)
+            time.sleep(args.detail_wait)
             detail = parse_detail_event(driver.page_source)
             print("Selected event detail:")
             print(f"league={detail.league} | {detail.home} {detail.home_score} - "
