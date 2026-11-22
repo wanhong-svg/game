@@ -7,6 +7,7 @@ inspect or click betting controls and does not make network/API requests.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import sys
 import time
 from pathlib import Path
@@ -34,6 +35,18 @@ def pull_to_refresh(driver, top_ratio: float = 0.16, height_ratio: float = 0.62,
     })
 
 
+def capture_ui(driver, snapshot_dir: Path, label: str, index: int) -> tuple[str, str]:
+    """Persist UI hierarchy and screenshot, returning hashes for comparison."""
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+    source = driver.page_source
+    screenshot = driver.get_screenshot_as_png()
+    xml_path = snapshot_dir / f"refresh_{index:03d}_{label}.xml"
+    png_path = snapshot_dir / f"refresh_{index:03d}_{label}.png"
+    xml_path.write_text(source, encoding="utf-8")
+    png_path.write_bytes(screenshot)
+    return hashlib.sha256(source.encode("utf-8")).hexdigest(), hashlib.sha256(screenshot).hexdigest()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Pull-to-refresh OP7 Android event list")
     parser.add_argument("--server", default=DEFAULT_SERVER_URL)
@@ -41,7 +54,8 @@ def main() -> int:
     parser.add_argument("--package", default=DEFAULT_PACKAGE)
     parser.add_argument("--count", type=int, default=1, help="Number of refresh gestures; 0 runs until Ctrl+C")
     parser.add_argument("--interval", type=float, default=20, help="Seconds between gestures (minimum 5)")
-    parser.add_argument("--wait-after-refresh", type=float, default=3, help="Wait for the list to settle")
+    parser.add_argument("--wait-after-refresh", type=float, default=5, help="Wait for the list to settle")
+    parser.add_argument("--snapshot-dir", default="artifacts/appium_refresh", help="Directory for before/after UI snapshots")
     parser.add_argument("--top-ratio", type=float, default=0.16)
     parser.add_argument("--height-ratio", type=float, default=0.62)
     parser.add_argument("--width-ratio", type=float, default=0.88)
@@ -61,12 +75,23 @@ def main() -> int:
         print("准备好后回到终端按 Enter；只执行列表区域下拉刷新手势，不点击盘口、投注或账户控件。")
         input()
         completed = 0
+        snapshot_dir = Path(args.snapshot_dir)
         while args.count == 0 or completed < args.count:
+            before_xml, before_png = capture_ui(driver, snapshot_dir, "before", completed + 1)
             pull_to_refresh(driver, args.top_ratio, args.height_ratio,
                             args.width_ratio, args.swipe_percent)
             completed += 1
             time.sleep(args.wait_after_refresh)
-            print(f"refresh gesture {completed} sent; activity={driver.current_activity}")
+            after_xml, after_png = capture_ui(driver, snapshot_dir, "after", completed)
+            hierarchy_changed = before_xml != after_xml
+            screenshot_changed = before_png != after_png
+            print(
+                f"refresh gesture {completed} sent; activity={driver.current_activity}; "
+                f"hierarchy_changed={hierarchy_changed}; screenshot_changed={screenshot_changed}; "
+                f"snapshots={snapshot_dir}"
+            )
+            if not hierarchy_changed:
+                print("UI hierarchy unchanged: refresh completion is NOT confirmed (data may also be unchanged).")
             if args.count == 0 or completed < args.count:
                 time.sleep(max(0, args.interval - args.wait_after_refresh))
         return 0
