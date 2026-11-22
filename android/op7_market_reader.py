@@ -55,7 +55,7 @@ def _parse_option(desc: str, current_market: str,
         return None
     # Handicap/total lines can also be decimals (e.g. +9.5 / 208.5).
     # The odds are the final decimal value in the accessibility label.
-    odds_matches = list(re.finditer(r"(?<![\\d.])(\\d+\\.\\d{1,4})(?!\\d)", flat))
+    odds_matches = list(re.finditer(r"(?<![\d.])(\d+\.\d{1,4})(?!\d)", flat))
     if not odds_matches:
         return None
     odds_match = odds_matches[-1]
