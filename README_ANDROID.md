@@ -149,3 +149,22 @@ python3 scripts/capture_op7_network.py --duration 90 --output /tmp/op7-events.pc
 **能力边界：** 这是模拟器网络接口的 PCAP 抓取，不是已解密的 HTTP 请求/响应。HTTPS 的 URL path、请求体和赛事 JSON 仍受 TLS 加密保护；脚本不会绕过证书固定、TLS 或设备安全机制。当前抓取范围可能包含模拟器内其他 APP 的网络流量，PCAP 也可能含敏感元数据，请仅在本机检查，不要提交到 Git 或直接公开。
 
 如果 OP7 是可调试构建，优先使用 Android Studio Network Inspector 查看该进程的请求与响应；否则请使用应用开发方提供的调试日志/API 文档。只有在合法授权且调试构建明确允许的情况下，才能进一步取得明文响应。确认真实赛事列表请求后，再将其 host/path/method 和响应字段映射接入 `android/op7_event_adapter.py`。不要把 Cookie、Authorization、Token、签名或完整请求头保存到仓库。
+
+
+## 10. OP7 赛事、盘口与注单面板三层只读采集
+
+已拆分为三个独立模块：
+
+- `android/op7_event_search.py`：解析赛事搜索结果和详情页赛事头部；按联赛、主客队、比赛节次及双方比分严格核验。主客场顺序相反时会按球队身份调整比分后比较；联赛、节次或比分不一致均拒绝匹配。比赛时钟允许因刷新产生小幅变化，不作为唯一匹配依据。
+- `android/op7_market_reader.py`：按盘口标题识别全场独赢、全场让分/让球、全场大小，再读取选项方向、盘口线和赔率。目标盘口必须唯一，例如 `FULL_TIME_HANDICAP + 主 +12.5`；不使用固定屏幕坐标。
+- `android/op7_selection_verifier.py`：读取点击盘口后出现的注单面板，核对联赛、主客队、盘口类型、投注方向、盘口数值、赔率；可选核对比分。任何关键字段不一致即停止采集。
+
+模块提供纯解析函数和基于 Appium accessibility label 的精确定位辅助函数。点击盘口选项只用于打开注单面板做二次读取；**不会填写金额，不会点击“投注”，不提交订单**。如果界面控件没有可唯一识别的 accessibility label，程序会失败关闭，不会退回固定坐标。
+
+运行离线单元测试：
+
+```bash
+python3 -m unittest tests.test_op7_ui_modules -v
+```
+
+当前模块已依据你提供的控件树和截图结构编写，但尚未在你的模拟器上实机回归。尤其需要在 Appium 实测中确认：赛事详情比分/节次控件、盘口选项的完整 content-desc，以及注单面板在不同赛事和盘口下是否保持同一字段结构。未经这一步，不把采集结果标记为生产可用。
