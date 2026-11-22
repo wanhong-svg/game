@@ -24,6 +24,7 @@ class ExpectedSelection:
     selection: str
     line: str
     odds: str
+    score: str = ""
 
 
 @dataclass(frozen=True)
@@ -89,8 +90,17 @@ def verify_selection(expected: ExpectedSelection, actual: SlipSnapshot) -> None:
     ):
         if _norm(wanted) != _norm(got):
             errors.append(f"{name}不一致（目标={wanted!r}，实际={got!r}）")
-    if _norm(expected.selection) not in _norm(actual.selection_text):
+    side = _norm(expected.selection)
+    if side in {"主", "主队", "home"}:
+        expected_pick = expected.home
+    elif side in {"客", "客队", "away"}:
+        expected_pick = expected.away
+    else:
+        expected_pick = expected.selection
+    if _norm(expected_pick) not in _norm(actual.selection_text):
         errors.append(f"投注方向不一致（目标={expected.selection!r}，实际={actual.selection_text!r}）")
+    if expected.score and expected.score.replace("：", ":") != actual.score.replace("：", ":"):
+        errors.append(f"比分不一致（目标={expected.score!r}，实际={actual.score!r}）")
     if errors:
         raise ValueError("注单面板核验失败，停止采集： " + "；".join(errors))
 
