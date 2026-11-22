@@ -54,13 +54,29 @@ def main() -> int:
     driver = None
     try:
         driver = create_driver(args.server, args.udid, args.package, no_reset=True)
-        event = parse_detail_event(driver.page_source)
-        if not event.league:
-            raise ValueError("详情页未能唯一读取联赛标签，拒绝继续")
-        print(f"Event: {event.league} | {event.home} {event.home_score} - "
-              f"{event.away_score} {event.away} | {event.period} {event.clock}")
+        source = driver.page_source
+        try:
+            event = parse_detail_event(source)
+            if not event.league:
+                raise ValueError("详情页未能唯一读取联赛标签")
+            print(f"Event: {event.league} | {event.home} {event.home_score} - "
+                  f"{event.away_score} {event.away} | {event.period} {event.clock}")
+        except ValueError as exc:
+            # Scheduled fixtures may show league/date/kickoff/teams without a
+            # live score or period. Do not mislabel that as being off the detail
+            # page; emit the visible text nodes so the header parser can be
+            # adapted to the actual native hierarchy.
+            import xml.etree.ElementTree as ET
+            print(f"Event header parser needs scheduled-fixture support: {exc}")
+            root = ET.fromstring(source)
+            print("Visible UI text nodes (tree order):")
+            for node in root.iter():
+                value = (node.attrib.get("text") or node.attrib.get("content-desc") or "").strip()
+                if value:
+                    bounds = node.attrib.get("bounds", "")
+                    print(f"  text={value!r} bounds={bounds}")
 
-        options = read_market_options(driver.page_source)
+        options = read_market_options(source)
         if not options:
             raise ValueError("当前页面未读取到全场盘口；请确认已打开赛事详情页并展开盘口")
         print(f"Readable full-time options: {len(options)}")
