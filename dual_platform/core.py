@@ -138,10 +138,16 @@ class MarketQuote:
     odds: str
     observed_at_utc: str
     market_id: str = ""
+    event_orientation: str = "SAME"
 
     @property
     def match_key(self) -> tuple[str, str, str, str]:
-        return (self.market_type, self.period, normalize_name(self.line), normalize_name(self.selection))
+        return (
+            self.market_type,
+            self.period,
+            normalize_line(self.line, self.event_orientation, self.market_type),
+            canonical_selection(self.selection, self.event_orientation, self.market_type),
+        )
 
 
 def normalize_market_type(value: str) -> Optional[str]:
