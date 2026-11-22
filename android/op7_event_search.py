@@ -92,12 +92,13 @@ def parse_search_results(source: str) -> list[EventSnapshot]:
         if not matchup:
             continue
         prefix = flat[:matchup.start()].strip()
-        # The competition is the first token/group; following text is progress/date.
-        league = prefix.split(" ", 1)[0].strip()
         progress_match = re.search(
-            r"(第[一二三四五六七八九十\d]+节|第[一二三四五六七八九十\d]+局|上半场|下半场|加时)\s+(\d{1,2}:\d{2})",
+            r"(第[一二三四五六七八九十\d]+节|第[一二三四五六七八九十\d]+局|上半场|下半场|加时)\s+(\d{1,2}:\d{2})\s*$",
             prefix,
         )
+        kickoff_match = re.search(r"\b\d{1,2}-\d{1,2}\s+\d{1,2}:\d{2}\s*$", prefix)
+        marker = progress_match or kickoff_match
+        league = prefix[:marker.start()].strip() if marker else prefix
         period = progress_match.group(1) if progress_match else ""
         clock = progress_match.group(2) if progress_match else ""
         event = EventSnapshot(league, matchup.group(1).strip(), matchup.group(2).strip(),
