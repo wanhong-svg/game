@@ -50,11 +50,18 @@ def read_selection_slip(source: str) -> SlipSnapshot:
     joined = "\n".join(values)
     market = next((x for x in values if x in {"全场独赢", "全场让分", "全场让球", "全场大小"}), "")
     league = next((x for x in values if x in {"NBA", "WNBA"}), "")
-    odds = ""
-    # OP7 slip accessibility tree exposes odds as a separate numeric view.
-    for value in values:
-        if re.fullmatch(r"\d+\.\d{1,4}", value):
-            odds = value
+    odds_candidates = []
+    # In the observed OP7 slip, the price is the numeric node immediately
+    # following the standalone "@" accessibility node (or "@0.88" itself).
+    for index, value in enumerate(values):
+        inline = re.fullmatch(r"@\s*(\d+\.\d{1,4})", value)
+        if inline:
+            odds_candidates.append(inline.group(1))
+        elif value == "@" and index + 1 < len(values):
+            following = values[index + 1]
+            if re.fullmatch(r"\d+\.\d{1,4}", following):
+                odds_candidates.append(following)
+    odds = odds_candidates[0] if len(odds_candidates) == 1 else ""
     matchup = next((x for x in values if re.search(r"\S+\s+VS\s+\S+", x, re.I)), "")
     if not matchup:
         raise ValueError("注单面板未找到赛事主客队字段")
