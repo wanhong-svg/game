@@ -49,25 +49,27 @@ def _decimal_text(value: str) -> str:
 
 def _parse_option(desc: str, current_market: str,
                   current_market_label: str) -> Optional[MarketOption]:
-    lines = [x.strip() for x in desc.splitlines() if x.strip()]
-    if not lines or not current_market:
+    # Android XML normalizes newlines inside content-desc attributes to spaces.
+    flat = re.sub(r"\s+", " ", desc).strip()
+    if not flat or not current_market:
         return None
-    joined = " ".join(lines)
-    odds_match = re.search(r"(?<![\d.])(\d+\.\d{1,4})(?!\d)", lines[-1])
+    odds_match = re.search(r"(?<![\d.])(\d+\.\d{1,4})(?!\d)", flat)
     if not odds_match:
         return None
     odds = _decimal_text(odds_match.group(1))
-    label = " ".join(lines[:-1]) if len(lines) > 1 else lines[0]
+    label = (flat[:odds_match.start()] + flat[odds_match.end():]).strip()
     label = re.sub(r"\s+", " ", label).strip()
-    # Full-time moneyline options may be 主/客; handicap and totals carry a line.
-    selection_match = re.match(r"^(主队?|客队?|主|客|大|小|Over|Under)\s*([+\-−]?\s*\d+(?:\.\d+)?)?$", label, re.I)
+    selection_match = re.fullmatch(
+        r"(主队?|客队?|主|客|大|小|Over|Under)\s*([+\-−＋]?\s*\d+(?:\.\d+)?)?",
+        label, re.I
+    )
     if not selection_match:
         return None
     selection = selection_match.group(1)
-    line = (selection_match.group(2) or "").replace(" ", "").replace("−", "-")
-    if current_market == "FULL_TIME_HANDICAP" and not line:
+    line = (selection_match.group(2) or "").replace(" ", "").replace("−", "-").replace("＋", "+")
+    if current_market in {"FULL_TIME_HANDICAP", "FULL_TIME_TOTAL"} and not line:
         return None
-    if current_market == "FULL_TIME_TOTAL" and not line:
+    if current_market == "FULL_TIME_MONEYLINE" and line:
         return None
     return MarketOption(
         market_label=current_market_label,
@@ -77,7 +79,6 @@ def _parse_option(desc: str, current_market: str,
         odds=odds,
         accessibility_label=desc,
     )
-
 
 def read_market_options(source: str) -> list[MarketOption]:
     """Read market sections by heading labels and their adjacent option controls."""
