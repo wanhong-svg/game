@@ -132,25 +132,25 @@ def _selected_state(element) -> bool | None:
 
 
 def ensure_selected(driver, label: str, wait: float = 0.5) -> None:
-    """Select a tab only when explicit UI state says it is not selected."""
+    """Activate an idempotent navigation tab when selected state is not exposed.
+
+    OP7's current native hierarchy omits selected/checked for these custom tabs.
+    Tapping the requested tab is safe whether it is already active or not.
+    """
     element = _control_by_label(driver, label)
     state = _selected_state(element)
-    if state is None:
-        raise RuntimeError(
-            f"控件「{label}」没有暴露 selected/checked 状态；"
-            "为避免误切换，已停止。请提供该控件的完整 XML 节点属性。"
-        )
-    if state:
-        print(f"「{label}」已经选中，无需切换。")
+    if state is True:
+        print(f"「{label}」已明确处于选中状态。")
         return
-    print(f"「{label}」当前未选中，执行切换。")
+    if state is False:
+        print(f"「{label}」明确未选中，执行切换。")
+    else:
+        print(f"「{label}」未暴露选中属性，点击目标导航项以确保进入该页面。")
     element.click()
     time.sleep(wait)
-    element = _control_by_label(driver, label)
-    if _selected_state(element) is not True:
-        raise RuntimeError(f"点击「{label}」后未能确认其已选中，停止后续操作。")
-    print(f"已确认「{label}」选中。")
-
+    # Re-query exact target to ensure the UI still exposes the intended tab.
+    _control_by_label(driver, label)
+    print(f"已点击「{label}」并重新确认目标控件存在。")
 
 def prepare_op7_page(driver, sport: str, wait: float = 0.5) -> None:
     """Ensure bottom 体育 tab, top EB provider, then the requested sport."""
