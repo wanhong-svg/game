@@ -88,6 +88,13 @@ def eb_events(payload):
   if mid and home and away: out.append({'id':str(mid),'home':str(home),'away':str(away),'raw_status':x.get('mst'),'phase_mmp':x.get('mmp')})
  return out
 
+def validate_event_list(rows, source):
+ if not isinstance(rows,list) or not rows:
+  raise ValueError(f'{source} returned an empty or unrecognized event list; previous snapshot is preserved')
+ if any(not isinstance(x,dict) or not x.get('id') for x in rows):
+  raise ValueError(f'{source} event list contains records without an event ID')
+ return rows
+
 def save_latest(out,name,payload,status='SUCCESS',details=None):
  out.mkdir(parents=True,exist_ok=True)
  stamp=now()
@@ -181,7 +188,7 @@ def main():
     if tick-clocks['fb_list']>=a.fb_list_interval or not fb_list:
      try:
       res=request_json(opctx,SITES['FB_ORIGIN']+'/v1/match/getList','POST',oh,body=fb_body,timeout_ms=a.timeout*1000)
-      fb_list=fb_events(res); save_latest(out,'FB_events',fb_list); clocks['fb_list']=time.monotonic()
+      fb_list=validate_event_list(fb_events(res),'FB'); save_latest(out,'FB_events',fb_list); clocks['fb_list']=time.monotonic()
       print(f'[{now()}] FB赛事列表刷新：{len(fb_list)}场')
      except Exception as e:
       save_failure(out,'FB_events',e); print(f'FB列表刷新失败：{type(e).__name__}: {e}',file=sys.stderr)
@@ -191,7 +198,7 @@ def main():
     if tick-clocks['eb_list']>=a.eb_list_interval or not eb_list:
      try:
       res=request_json(opctx,SITES['EB_ORIGIN']+'/yewu11/v1/m/matchesPagePB','POST',oh,body=eb_body,timeout_ms=a.timeout*1000)
-      eb_list=eb_events(res); save_latest(out,'EB_events',eb_list); clocks['eb_list']=time.monotonic()
+      eb_list=validate_event_list(eb_events(res),'EB'); save_latest(out,'EB_events',eb_list); clocks['eb_list']=time.monotonic()
       print(f'[{now()}] EB赛事列表刷新：{len(eb_list)}场')
      except Exception as e:
       save_failure(out,'EB_events',e); print(f'EB列表刷新失败：{type(e).__name__}: {e}',file=sys.stderr)
@@ -203,8 +210,10 @@ def main():
       pb_params=dict(pb_q); pb_params.setdefault('_',str(int(time.time()*1000)))
       res=request_json(pbctx,SITES['PINGBO_ORIGIN']+'/sports-service/sv/compact/events','GET',ph,params=pb_params,timeout_ms=a.timeout*1000)
       pb_list=mapper.extract_pingbo_events(res)
-      normalized=[{k:v for k,v in x.items() if not k.startswith('_')} for x in pb_list]
-      pb_markets=[r for x in pb_list for r in mapper.flatten_pingbo_markets(x)]
+      pb_list=validate_event_list(pb_list,'Pingbo')
+      observed=now()
+      normalized=[{**{k:v for k,v in x.items() if not k.startswith('_')},'observed_at_utc':observed} for x in pb_list]
+      pb_markets=[{**r,'observed_at_utc':observed} for x in pb_list for r in mapper.flatten_pingbo_markets(x)]
       save_latest(out,'Pingbo_events',{'events':normalized,'markets':pb_markets}); clocks['pb']=time.monotonic()
       print(f'[{now()}] Pingbo赛事+内嵌盘口刷新：{len(pb_list)}场 / {len(pb_markets)}条盘口选项')
      except Exception as e:
