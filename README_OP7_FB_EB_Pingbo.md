@@ -107,7 +107,7 @@ python op7_fb_eb_pingbo_live_refresh.py --config refresh_config.json --profiles-
 
 ## 五、安全及边界
 
-- 只允许 `api.738z3.com` 的 `getList/getMatchDetail`、`api.r4bud5u7.com` 的 `matchesPagePB/getMatchOddsInfoPB`、`www.part567.com` 的 `compact/events`。
+- 只允许 `api.738z3.com` 的 `getList/getMatchDetail`、`api.r4bud5u7.com` 的 `matchesPagePB/getMatchOddsInfoPB`、`www.pin135.com` 的 `compact/events`。
 - 不会访问任何投注、下单、订单、钱包、充值、提现、cashout 或资金变更接口。
 - 不读取或复用 HAR 中的 Cookie、Token、密码或会话头；使用用户本机正常登录的浏览器配置。不得绕过验证码或 MFA。
 - 若会话过期、接口返回 401/403、站点要求验证码/MFA，应按站点正常流程重新登录。
