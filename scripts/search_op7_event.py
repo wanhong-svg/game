@@ -131,11 +131,12 @@ def _selected_state(element) -> bool | None:
     return None
 
 
-def ensure_selected(driver, label: str, wait: float = 0.5) -> None:
-    """Activate an idempotent navigation tab when selected state is not exposed.
+def ensure_selected(driver, label: str, wait: float = 1.5) -> None:
+    """Select a navigation tab, wait for rendering, then verify selected state.
 
-    OP7's current native hierarchy omits selected/checked for these custom tabs.
-    Tapping the requested tab is safe whether it is already active or not.
+    Existence after a tap is not proof of selection. Fail closed when the app
+    does not expose selected/checked state; visual verification can be added
+    once a reference screenshot for the active/inactive appearance is supplied.
     """
     element = _control_by_label(driver, label)
     state = _selected_state(element)
@@ -145,15 +146,22 @@ def ensure_selected(driver, label: str, wait: float = 0.5) -> None:
     if state is False:
         print(f"「{label}」明确未选中，执行切换。")
     else:
-        print(f"「{label}」未暴露选中属性，点击目标导航项以确保进入该页面。")
+        print(f"「{label}」未提供 selected/checked 状态，点击后必须重新验证。")
     element.click()
     time.sleep(wait)
-    # Re-query exact target to ensure the UI still exposes the intended tab.
-    _control_by_label(driver, label)
-    print(f"已点击「{label}」并重新确认目标控件存在。")
+    refreshed = _control_by_label(driver, label)
+    verified = _selected_state(refreshed)
+    if verified is not True:
+        reason = "仍明确未选中" if verified is False else "控件树未暴露 selected/checked，无法确认"
+        raise RuntimeError(
+            f"点击「{label}」并等待 {wait:.1f}s 后，{reason}；"
+            "停止后续操作，不能仅凭控件存在判定切换成功。"
+        )
+    print(f"已等待 {wait:.1f}s，并确认「{label}」处于选中状态。")
 
-def prepare_op7_page(driver, sport: str, wait: float = 0.5) -> None:
-    """Ensure bottom 体育 tab, top EB provider, then the requested sport."""
+
+def prepare_op7_page(driver, sport: str, wait: float = 1.5) -> None:
+    """Select 体育 -> EB -> requested sport, waiting and verifying each step."""
     ensure_selected(driver, "体育", wait)
     ensure_selected(driver, "EB", wait)
     sport_label = {"football": "足球", "basketball": "篮球"}[sport]
@@ -175,6 +183,8 @@ def main() -> int:
     parser.add_argument("--search-field-id", help="Exact Android resource-id of the search input")
     parser.add_argument("--search-trigger-id", help="Exact resource-id of the search icon/button, if it first opens the input")
     parser.add_argument("--wait", type=float, default=2, help="Seconds to wait after search submission")
+    parser.add_argument("--setup-wait", type=float, default=1.5,
+                        help="Seconds to wait after each initial navigation step (default: 1.5)")
     parser.add_argument("--league", help="Exact competition label used to select a result")
     parser.add_argument("--home", help="Home team name used with --league/--away")
     parser.add_argument("--away", help="Away team name used with --league/--home")
@@ -185,13 +195,15 @@ def main() -> int:
         parser.error("--event cannot be blank")
     if args.wait < 0:
         parser.error("--wait must be >= 0")
+    if args.setup_wait < 0:
+        parser.error("--setup-wait must be >= 0")
 
     driver = None
     try:
         driver = create_driver(args.server, args.udid, args.package, no_reset=True)
         print(f"Connected: package={driver.current_package}, activity={driver.current_activity}")
         print("准备 OP7 页面：体育主菜单 -> EB -> 指定球类。")
-        prepare_op7_page(driver, args.sport, args.wait if args.wait else 0.5)
+        prepare_op7_page(driver, args.sport, args.setup_wait)
         print("页面切换完成，开始识别赛事搜索入口。")
         if args.search_trigger_id:
             _find_by_resource_id(driver, args.search_trigger_id).click()
