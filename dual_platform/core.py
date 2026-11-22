@@ -8,13 +8,11 @@ from __future__ import annotations
 import json
 import sqlite3
 import unicodedata
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
-from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Iterable, Optional
-
 
 ALLOWED_MARKETS = {"FULL_TIME_MONEYLINE", "FULL_TIME_TOTAL", "FULL_TIME_HANDICAP"}
 MARKET_LABELS = {
@@ -58,6 +56,7 @@ class EventMatch:
     pingbo_event_id: str
     confidence: float
     start_delta_seconds: float
+    orientation: str
     status: str
 
 
@@ -73,11 +72,10 @@ def match_events_unique(
     pingbo_events: Iterable[Event],
     *,
     start_tolerance_seconds: int = 300,
-    minimum_name_similarity: float = 0.96,
 ) -> list[EventMatch]:
-    """Return only mutual, one-to-one event matches; ambiguity fails closed."""
+    """Return only mutual one-to-one exact team matches; ambiguity fails closed."""
     left, right = list(op7_events), list(pingbo_events)
-    scores: dict[tuple[int, int], tuple[float, float]] = {}
+    candidates: dict[tuple[int, int], tuple[float, str]] = {}
     for i, a in enumerate(left):
         for j, b in enumerate(right):
             if not all((a.home, a.away, b.home, b.away, a.start_time_utc, b.start_time_utc)):
@@ -88,29 +86,23 @@ def match_events_unique(
                 continue
             if delta > start_tolerance_seconds:
                 continue
-            same = (normalize_name(a.home) == normalize_name(b.home)
-                    and normalize_name(a.away) == normalize_name(b.away))
-            reversed_pair = (normalize_name(a.home) == normalize_name(b.away)
-                             and normalize_name(a.away) == normalize_name(b.home))
-            if same or reversed_pair:
-                scores[(i, j)] = (1.0, delta)
-                continue
-            direct = (SequenceMatcher(None, normalize_name(a.home), normalize_name(b.home)).ratio()
-                      + SequenceMatcher(None, normalize_name(a.away), normalize_name(b.away)).ratio()) / 2
-            reverse = (SequenceMatcher(None, normalize_name(a.home), normalize_name(b.away)).ratio()
-                       + SequenceMatcher(None, normalize_name(a.away), normalize_name(b.home)).ratio()) / 2
-            similarity = max(direct, reverse)
-            if similarity >= minimum_name_similarity:
-                scores[(i, j)] = (similarity, delta)
+            ah, aa = normalize_name(a.home), normalize_name(a.away)
+            bh, ba = normalize_name(b.home), normalize_name(b.away)
+            if ah and aa and ah == bh and aa == ba:
+                candidates[(i, j)] = (delta, "SAME")
+            elif ah and aa and ah == ba and aa == bh:
+                candidates[(i, j)] = (delta, "REVERSED")
 
-    result = []
-    for (i, j), (score, delta) in scores.items():
-        left_choices = [jj for (ii, jj) in scores if ii == i]
-        right_choices = [ii for (ii, jj) in scores if jj == j]
-        if len(left_choices) != 1 or len(right_choices) != 1:
+    matches = []
+    for (i, j), (delta, orientation) in candidates.items():
+        if sum(1 for ii, _ in candidates if ii == i) != 1:
             continue
-        result.append(EventMatch(left[i].event_id, right[j].event_id, score, delta, "UNIQUE"))
-    return result
+        if sum(1 for _, jj in candidates if jj == j) != 1:
+            continue
+        matches.append(EventMatch(
+            left[i].event_id, right[j].event_id, 1.0, delta, orientation, "UNIQUE"
+        ))
+    return matches
 
 
 @dataclass(frozen=True)
@@ -147,7 +139,7 @@ def normalize_market_type(value: str) -> Optional[str]:
 
 def compare_quotes(op7: MarketQuote, pingbo: MarketQuote, *, max_age_seconds: int = 30,
                    now: Optional[datetime] = None) -> dict:
-    """Compare same event/market/line/selection quotes; reject stale/mismatched data."""
+    """Compare same market/line/selection quotes; reject stale/mismatched data."""
     if op7.platform != "OP7" or pingbo.platform != "PINGBO":
         raise ValueError("报价平台必须分别为 OP7 和 PINGBO")
     if op7.market_type not in ALLOWED_MARKETS or pingbo.market_type not in ALLOWED_MARKETS:
@@ -155,13 +147,11 @@ def compare_quotes(op7: MarketQuote, pingbo: MarketQuote, *, max_age_seconds: in
     if op7.match_key != pingbo.match_key:
         raise ValueError("盘口类型、比赛阶段、盘口线或投注选项不一致")
     current = now or datetime.now(timezone.utc)
-    stamps = []
     for quote in (op7, pingbo):
         stamp = _parse_time(quote.observed_at_utc)
         age = (current - stamp).total_seconds()
         if age < -5 or age > max_age_seconds:
             raise ValueError(f"{quote.platform}赔率数据过期或时钟异常")
-        stamps.append(stamp)
     a, b = decimal_value(op7.odds), decimal_value(pingbo.odds)
     if a is None or b is None:
         raise ValueError("赔率无效")
@@ -180,7 +170,7 @@ def compare_quotes(op7: MarketQuote, pingbo: MarketQuote, *, max_age_seconds: in
 
 
 class AuditStore:
-    """SQLite audit log with one record per event + market (+ line) business key."""
+    """SQLite audit log; one record per event + market type, regardless of line."""
     def __init__(self, path: str | Path):
         self.path = str(path)
         self.db = sqlite3.connect(self.path)
@@ -192,7 +182,7 @@ class AuditStore:
         CREATE TABLE IF NOT EXISTS market_locks (
           event_key TEXT NOT NULL, market_type TEXT NOT NULL, line_key TEXT NOT NULL,
           created_at TEXT NOT NULL, amount TEXT, status TEXT NOT NULL,
-          PRIMARY KEY(event_key, market_type, line_key)
+          PRIMARY KEY(event_key, market_type)
         );
         CREATE TABLE IF NOT EXISTS alerts (
           id INTEGER PRIMARY KEY, created_at TEXT NOT NULL, severity TEXT NOT NULL,
@@ -211,7 +201,7 @@ class AuditStore:
             raise ValueError("不支持的盘口类型")
         if amount is not None:
             value = Decimal(str(amount))
-            if value < 50 or value > 500:
+            if not value.is_finite() or value < 50 or value > 500:
                 raise ValueError("金额必须在 50–500 之间")
         try:
             self.db.execute("INSERT INTO market_locks VALUES (?,?,?,?,?,?)",
