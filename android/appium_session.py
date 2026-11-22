@@ -43,7 +43,7 @@ def create_driver(
 def current_app_state(driver) -> dict:
     """Return non-secret app/session metadata and the native hierarchy."""
     return {
-        "package": DEFAULT_PACKAGE,
+        "package": driver.current_package,
         "current_activity": driver.current_activity,
         "current_package": driver.current_package,
         "page_source": driver.page_source,
