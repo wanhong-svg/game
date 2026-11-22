@@ -62,7 +62,29 @@ python3 scripts/refresh_op7_event_list.py --count 0 --interval 20
 
 脚本通过 UiAutomator2 的屏幕手势在列表区域执行下拉，不依赖尚未确认的控件 ID；如果 APP 的列表不是标准下拉刷新布局，可使用 `--top-ratio`、`--height-ratio`、`--width-ratio`、`--swipe-percent` 调整手势区域。该脚本只发送 UI 手势，不会读取或请求赛事 API，也不会点击投注/账户控件。
 
-## 4. 赛事列表接口发现（仍需真实运行证据）
+## 4. 在 APP 内搜索命令行指定的赛事
+
+此功能通过 Appium 操作 OP7 当前界面的原生搜索框，不调用外部赛事 API。先在模拟器中打开 OP7 的赛事列表页面，然后执行：
+
+```bash
+python3 scripts/search_op7_event.py --event "Los Angeles Lakers vs Boston Celtics"
+```
+
+脚本会在控件树中寻找带搜索语义的可编辑控件；只有唯一且可定位时才输入赛事名称并按 Enter。若搜索入口需要先点击搜索图标，可先检查页面控件：
+
+```bash
+python3 scripts/inspect_op7_app.py --output /tmp/op7-native-ui.xml
+```
+
+根据控件树中的真实 `resource-id` 指定搜索入口和输入框：
+
+```bash
+python3 scripts/search_op7_event.py --event "赛事名称" --search-trigger-id "实际搜索按钮resource-id" --search-field-id "实际输入框resource-id"
+```
+
+如只想填入关键字、不提交搜索，可加 `--submit none`。当前界面没有可安全唯一识别的搜索框时，脚本会列出候选控件并停止，不会猜测控件或误操作其他输入框。搜索结果结构仍需在实际模拟器中验证。
+
+## 5. 赛事列表接口发现（仍需真实运行证据）
 
 Appium 负责启动 APP 和控制原生 UI；Appium 本身不会自动提供 APP 的 HTTP 请求记录。必须从 `com.seaapp.prod` 的真实运行流量或应用可用的诊断信息中确认赛事列表接口，不能把浏览器端接口或猜测 URL 当作 APP 接口。
 
@@ -76,13 +98,13 @@ Appium 负责启动 APP 和控制原生 UI；Appium 本身不会自动提供 APP
 
 确认接口前，不创建伪造的 `APP_EVENT_LIST_URL`，也不重放未经确认的请求。若接口需要会话凭据，应只从本机受控会话获取，并且不落盘到 Git。
 
-## 5. 赛事列表响应适配器
+## 6. 赛事列表响应适配器
 
 `android/op7_event_adapter.py` 提供离线、可配置的 JSON 响应适配器。由于当前执行环境无法连接你的 Android 模拟器，也没有真实 APP Network Inspector 导出记录，**真实赛事列表 URL、HTTP 方法、响应字段路径尚未确认**；示例映射文件仅为模板，不能直接视为真实接口。
 
 确认响应结构并脱敏后，复制 `android/event_list_mapping.example.json`，按真实响应填写 `events_path` 与字段路径。适配器会输出 mapper 风格赛事行，并严格拒绝空赛事列表、缺少赛事 ID/主客队或无效开赛时间。它不发起网络请求、不处理认证信息，也不会猜测 API 地址。
 
-## 6. 后续适配器约束
+## 7. 后续适配器约束
 
 接口确认后，APP 数据源适配器将遵循以下约束：
 
@@ -93,7 +115,7 @@ Appium 负责启动 APP 和控制原生 UI；Appium 本身不会自动提供 APP
 - 记录抓取时间、分页信息、响应数量和错误状态；不得把空响应当成成功的零赛事。
 - 通过适配层把赛事字段转换为现有 mapper 可处理的数据结构，避免重写成熟的解析/去重逻辑。
 
-## 7. 运行配置
+## 8. 运行配置
 
 默认值：
 
