@@ -67,16 +67,16 @@ python3 scripts/refresh_op7_event_list.py --count 0 --interval 20
 此功能通过 Appium 操作 OP7 当前界面的原生搜索框，不调用外部赛事 API。先在模拟器中打开 OP7 的赛事列表页面，然后执行：
 
 ```bash
-python3 scripts/search_op7_event.py --event "Los Angeles Lakers vs Boston Celtics"
+python3 scripts/search_op7_event.py --event "国王" --league "NBA" --home "萨克拉门托国王" --away "波士顿凯尔特人"
 ```
 
-脚本会在控件树中寻找带搜索语义的可编辑控件；只有唯一且可定位时才输入赛事名称并按 Enter。若搜索入口需要先点击搜索图标，可先检查页面控件：
+先在 OP7 中手动打开搜索面板（当前截图中的搜索输入框没有可用 resource-id）。脚本会寻找唯一可见的 EditText；若存在 resource-id 则按 ID 定位，否则只在可见输入框恰好一个时使用该控件本身，不使用固定坐标。输入并按 Enter 后解析搜索结果。可进一步提供联赛与两队名称，让脚本按唯一结果行的 accessibility label 动态点击，而不是使用固定 adb tap 坐标：
 
 ```bash
 python3 scripts/inspect_op7_app.py --output /tmp/op7-native-ui.xml
 ```
 
-根据控件树中的真实 `resource-id` 指定搜索入口和输入框：
+如有多个输入框且无法唯一识别，再根据控件树中的真实 `resource-id` 指定搜索入口和输入框：
 
 ```bash
 python3 scripts/search_op7_event.py --event "赛事名称" --search-trigger-id "实际搜索按钮resource-id" --search-field-id "实际输入框resource-id"
@@ -155,11 +155,11 @@ python3 scripts/capture_op7_network.py --duration 90 --output /tmp/op7-events.pc
 
 已拆分为三个独立模块：
 
-- `android/op7_event_search.py`：解析赛事搜索结果和详情页赛事头部；按联赛、主客队、比赛节次及双方比分严格核验。主客场顺序相反时会按球队身份调整比分后比较；联赛、节次或比分不一致均拒绝匹配。比赛时钟允许因刷新产生小幅变化，不作为唯一匹配依据。
+- `android/op7_event_search.py`：解析赛事搜索结果和详情页赛事头部；按联赛、主客队、比赛节次、双方比分及比赛时钟严格核验。主客场顺序相反时会按球队身份调整比分后比较；两端时钟必须可读取且差值不超过 120 秒，联赛、节次、比分不一致或进度信息不足均拒绝匹配。搜索列表中的日期（例如 11-22）不会被误解析成比分。
 - `android/op7_market_reader.py`：按盘口标题识别全场独赢、全场让分/让球、全场大小，再读取选项方向、盘口线和赔率。目标盘口必须唯一，例如 `FULL_TIME_HANDICAP + 主 +12.5`；不使用固定屏幕坐标。
 - `android/op7_selection_verifier.py`：读取点击盘口后出现的注单面板，核对联赛、主客队、盘口类型、投注方向、盘口数值、赔率；可选核对比分。任何关键字段不一致即停止采集。
 
-模块提供纯解析函数和基于 Appium accessibility label 的精确定位辅助函数。点击盘口选项只用于打开注单面板做二次读取；**不会填写金额，不会点击“投注”，不提交订单**。如果界面控件没有可唯一识别的 accessibility label，程序会失败关闭，不会退回固定坐标。
+模块提供纯解析函数和基于 Appium accessibility label 的精确定位辅助函数。赛事搜索结果按联赛与主客队唯一定位后，直接调用对应 UI 元素的 click；盘口选项也按完整 accessibility label 定位。整个流程不使用固定屏幕坐标或固定 adb tap；点击盘口选项只用于打开注单面板做二次读取；**不会填写金额，不会点击“投注”，不提交订单**。如果界面控件没有可唯一识别的 accessibility label，程序会失败关闭，不会退回固定坐标。
 
 运行离线单元测试：
 
