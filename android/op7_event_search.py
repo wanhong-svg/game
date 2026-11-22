@@ -30,7 +30,8 @@ class EventSnapshot:
 
 
 def _score_pair(text: str) -> tuple[Optional[int], Optional[int]]:
-    match = re.search(r"(?<!\d)(\d{1,3})\s*[-:：]\s*(\d{1,3})(?!\d)", text)
+    # A colon belongs to the game clock (08:46), not the score.
+    match = re.search(r"(?<!\d)(\d{1,3})\s*[-–—]\s*(\d{1,3})(?!\d)", text)
     return (int(match.group(1)), int(match.group(2))) if match else (None, None)
 
 
