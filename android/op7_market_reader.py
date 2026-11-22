@@ -39,7 +39,8 @@ class MarketOption:
 def _decimal_text(value: str) -> str:
     try:
         number = Decimal(value)
-        if not number.is_finite() or number <= 1:
+        # OP7 may display Hong Kong odds below 1.00 (e.g. 0.88).
+        if not number.is_finite() or number <= 0:
             raise ValueError
         return format(number.normalize(), "f")
     except (InvalidOperation, ValueError):
