@@ -164,7 +164,7 @@ python3 scripts/capture_op7_network.py --duration 90 --output /tmp/op7-events.pc
 运行离线单元测试：
 
 ```bash
-python3 -m unittest tests.test_op7_ui_modules -v
+python3 -m unittest discover -s tests -p 'test_op7_ui_modules.py' -v
 ```
 
 当前模块已依据你提供的控件树和截图结构编写，但尚未在你的模拟器上实机回归。尤其需要在 Appium 实测中确认：赛事详情比分/节次控件、盘口选项的完整 content-desc，以及注单面板在不同赛事和盘口下是否保持同一字段结构。未经这一步，不把采集结果标记为生产可用。
