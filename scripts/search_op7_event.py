@@ -36,11 +36,26 @@ def _search_related(node: ET.Element) -> bool:
     return any(term in values for term in SEARCH_TERMS)
 
 
+def _parse_bounds(value: str):
+    match = __import__("re").fullmatch(r"\\[(\\d+),(\\d+)\\]\\[(\\d+),(\\d+)\\]", value or "")
+    return tuple(map(int, match.groups())) if match else None
+
+
 def inspect_search_controls(driver) -> tuple[list[dict], list[dict]]:
-    """Return search-like editable fields and clickable search launchers."""
+    """Find editable fields and the unlabeled magnifier immediately left of 联赛."""
     root = ET.fromstring(driver.page_source)
     fields, launchers = [], []
-    for node in root.iter():
+    nodes = list(root.iter())
+    league_nodes = [
+        node for node in nodes
+        if (node.attrib.get("content-desc", "").strip() == "联赛"
+            or node.attrib.get("text", "").strip() == "联赛")
+        and node.attrib.get("clickable") == "true"
+    ]
+    league_rects = [_parse_bounds(n.attrib.get("bounds", "")) for n in league_nodes]
+    league_rects = [r for r in league_rects if r]
+    blank_images = []
+    for node in nodes:
         attrs = node.attrib
         item = {
             "resource_id": attrs.get("resource-id", ""),
@@ -56,8 +71,32 @@ def inspect_search_controls(driver) -> tuple[list[dict], list[dict]]:
             fields.append(item)
         elif item["clickable"] and _search_related(node):
             launchers.append(item)
-    return fields, launchers
+        elif (item["clickable"] and attrs.get("class") == "android.widget.ImageView"
+              and not item["content_desc"] and not item["text"] and item["bounds"]):
+            rect = _parse_bounds(item["bounds"])
+            if rect:
+                blank_images.append((item, rect))
 
+    # On this OP7 page the magnifier has no accessibility label. Identify it
+    # structurally: a clickable, unlabeled ImageView on the same toolbar row,
+    # immediately to the left of the clickable 联赛 filter.
+    nearby = []
+    for item, (left, top, right, bottom) in blank_images:
+        for ll, lt, lr, lb in league_rects:
+            vertical_overlap = min(bottom, lb) - max(top, lt)
+            horizontal_gap = ll - right
+            if vertical_overlap > 0 and 0 <= horizontal_gap <= 100:
+                nearby.append(item)
+                break
+    if len(nearby) == 1:
+        item = nearby[0]
+        item["locator_xpath"] = (
+            "//*[@class='android.widget.ImageView' and @clickable='true' "
+            f"and @bounds={_xpath_literal(item['bounds'])}]"
+        )
+        item["identified_as"] = "unlabeled magnifier left of 联赛"
+        launchers.append(item)
+    return fields, launchers
 
 def _find_by_resource_id(driver, resource_id: str):
     return driver.find_element(AppiumBy.ID, resource_id)
@@ -96,6 +135,16 @@ def main() -> int:
             field = _find_by_resource_id(driver, args.search_field_id)
         else:
             fields, launchers = inspect_search_controls(driver)
+            if not fields and not args.search_trigger_id:
+                structural = [item for item in launchers if item.get("locator_xpath")]
+                if len(structural) == 1:
+                    print("Detected search launcher:", structural[0]["identified_as"])
+                    matches = driver.find_elements(AppiumBy.XPATH, structural[0]["locator_xpath"])
+                    if len(matches) != 1:
+                        raise ValueError(f"放大镜控件匹配到 {len(matches)} 个元素，拒绝点击")
+                    matches[0].click()
+                    time.sleep(0.5)
+                    fields, launchers = inspect_search_controls(driver)
             if len(fields) != 1:
                 print(f"Search input candidates ({len(fields)}):")
                 for item in fields:
@@ -103,8 +152,7 @@ def main() -> int:
                 print(f"Search launcher candidates ({len(launchers)}):")
                 for item in launchers:
                     print(item)
-                print("无法安全唯一识别搜索输入框。请根据上方控件信息重新运行并传入 --search-field-id；"
-                      "若搜索图标需要先点击以展开输入框，传入 --search-trigger-id。", file=sys.stderr)
+                print("无法安全唯一识别搜索输入框；已拒绝猜测点击。", file=sys.stderr)
                 return 2
             resource_id = fields[0]["resource_id"]
             if resource_id:
