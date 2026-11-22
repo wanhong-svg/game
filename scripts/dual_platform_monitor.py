@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from dual_platform.sessions import launch_dual_sessions, wait_for_manual_login
-from dual_platform.core import AuditStore
+from dual_platform.core import AuditStore\nfrom dual_platform.pingbo_events import fetch_pingbo_events
 
 
 def prompt_pingbo_url() -> str:
@@ -28,7 +28,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Launch OP7 Android + Pingbo browser sessions")
     parser.add_argument("--pingbo-url", default=os.getenv("PINGBO_URL"),
                         help="Optional Pingbo login URL; omitted means prompt in terminal")
-    parser.add_argument("--db", default="dual_platform_monitor.sqlite3")
+    parser.add_argument("--db", default="dual_platform_monitor.sqlite3")\n    parser.add_argument("--refresh-config", default="refresh_config.json",\n                        help="Local config containing part567.events_params; falls back to refresh_config.example.json")
     parser.add_argument("--headless", action="store_true",
                         help="Launch browser headless (not recommended for manual login)")
     args = parser.parse_args()
