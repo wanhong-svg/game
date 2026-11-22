@@ -185,6 +185,12 @@ def _is_selected(driver, label: str, element) -> bool | None:
         ratio = _element_blue_ratio(element)
         print(f"「体育」选中视觉检测：蓝色像素占比 {ratio:.1%}。")
         return ratio >= 0.015
+    if label in ("足球", "篮球"):
+        ratio = _element_blue_ratio(element)
+        print(f"「{label}」选中视觉检测：蓝色像素占比 {ratio:.1%}。")
+        # Sport tabs use the same blue active styling. Their clickable bounds
+        # can be tighter than the bottom navigation, so use a modest threshold.
+        return ratio >= 0.01
     return _selected_state(element)
 
 
