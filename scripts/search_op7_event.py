@@ -37,7 +37,7 @@ def _search_related(node: ET.Element) -> bool:
 
 
 def _parse_bounds(value: str):
-    match = __import__("re").fullmatch(r"\\[(\\d+),(\\d+)\\]\\[(\\d+),(\\d+)\\]", value or "")
+    match = __import__("re").fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", value or "")
     return tuple(map(int, match.groups())) if match else None
 
 
