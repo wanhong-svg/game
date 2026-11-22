@@ -16,7 +16,7 @@ SITES={
  'OP7_WEB':'https://op7.io/zh/',
  'FB_ORIGIN':'https://api.738z3.com',
  'EB_ORIGIN':'https://api.r4bud5u7.com',
- 'PINGBO_WEB':'https://www.part567.com/zh-cn/compact/sports',
+ 'PINGBO_WEB':'https://www.pin135.com/',
  'PINGBO_ORIGIN':'https://www.part567.com',
 }
 ALLOW={
@@ -103,7 +103,7 @@ def save_failure(out,name,error):
  (out/(name+'_status.json')).write_text(json.dumps({'status':status,'failed_at_utc':now(),'error_type':type(error).__name__,'error':str(error)},ensure_ascii=False,indent=2),encoding='utf-8')
 
 def setup_session(site,profiles_dir):
- sites={'op7':('https://op7.io/zh/','OP7'),'pingbo':('https://www.part567.com/zh-cn/compact/sports','Pingbo')}
+ sites={'op7':('https://op7.io/zh/','OP7'),'pingbo':('https://www.pin135.com/','Pingbo')}
  targets=list(sites) if site=='both' else [site]
  with sync_playwright() as p:
   for key in targets:
