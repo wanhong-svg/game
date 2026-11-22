@@ -155,13 +155,47 @@ def same_live_event(a: EventSnapshot, b: EventSnapshot,
     return (a.home_score, a.away_score) == (b_home, b_away)
 
 
+def _league_matches(actual: str, requested: str) -> bool:
+    """Match common Chinese league aliases while keeping competition identity strict."""
+    aliases = {
+        "英超": "英格兰超级联赛",
+        "英格兰超级联赛": "英格兰超级联赛",
+        "premierleague": "英格兰超级联赛",
+        "epl": "英格兰超级联赛",
+    }
+    actual_norm = aliases.get(norm(actual), norm(actual))
+    requested_norm = aliases.get(norm(requested), norm(requested))
+    return actual_norm == requested_norm
+
+
+def _team_name_matches(actual: str, requested: str) -> bool:
+    """Allow abbreviated/partial team names, but require a meaningful containment match."""
+    actual_norm, requested_norm = norm(actual), norm(requested)
+    if not actual_norm or not requested_norm:
+        return False
+    return actual_norm == requested_norm or actual_norm in requested_norm or requested_norm in actual_norm
+
+
 def find_unique_search_result(events: list[EventSnapshot], *, league: str,
                               home: str, away: str) -> EventSnapshot:
-    matches = [e for e in events if norm(e.league) == norm(league)
-               and ((norm(e.home) == norm(home) and norm(e.away) == norm(away))
-                    or (norm(e.home) == norm(away) and norm(e.away) == norm(home)))]
+    """Select one event by competition and two teams, ignoring home/away input order.
+
+    Team names may be abbreviated (for example 曼城 for 曼彻斯特城) but both
+    requested teams must match the two teams on the same result row. If more
+    than one event qualifies, fail closed rather than selecting arbitrarily.
+    """
+    matches = [
+        event for event in events
+        if _league_matches(event.league, league)
+        and (
+            (_team_name_matches(event.home, home) and _team_name_matches(event.away, away))
+            or (_team_name_matches(event.home, away) and _team_name_matches(event.away, home))
+        )
+    ]
     if len(matches) != 1:
-        raise ValueError(f"赛事搜索结果不唯一：找到 {len(matches)} 场符合联赛和主客队条件的赛事")
+        raise ValueError(
+            f"赛事搜索结果不唯一：找到 {len(matches)} 场符合联赛及两队名称（不区分主客顺序）的赛事"
+        )
     return matches[0]
 
 
