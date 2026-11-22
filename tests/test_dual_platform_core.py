@@ -52,3 +52,23 @@ def test_market_lock_is_once_per_event_and_market_not_per_line(tmp_path):
     with pytest.raises(ValueError):
         store.lock_market("event-2", "FULL_TIME_HANDICAP", "-1.5", 501)
     store.close()
+
+
+def test_reversed_event_handicap_is_canonicalized():
+    now = datetime.now(timezone.utc)
+    stamp = now.isoformat()
+    op7 = MarketQuote("OP7", "home-away", "FULL_TIME_HANDICAP", "FULL_TIME", "-1.5", "home", "1.95", stamp)
+    pingbo = MarketQuote("PINGBO", "away-home", "FULL_TIME_HANDICAP", "FULL_TIME", "+1.5", "away", "1.90", stamp, event_orientation="REVERSED")
+    assert op7.match_key == pingbo.match_key
+
+
+def test_monitor_requires_confirmed_event_pair(tmp_path):
+    from dual_platform.monitor import compare_cycle
+
+    now = datetime.now(timezone.utc).isoformat()
+    op7 = MarketQuote("OP7", "event-a", "FULL_TIME_TOTAL", "FULL_TIME", "2.5", "over", "1.95", now)
+    wrong_event = MarketQuote("PINGBO", "event-b", "FULL_TIME_TOTAL", "FULL_TIME", "2.5", "over", "1.90", now)
+    store = AuditStore(tmp_path / "monitor.sqlite3")
+    assert compare_cycle([op7], [wrong_event], store, event_pairs={"event-a": "event-c"}) == []
+    assert compare_cycle([op7], [wrong_event], store, event_pairs={"event-a": "event-b"})[0]["status"] == "COMPARABLE"
+    store.close()
