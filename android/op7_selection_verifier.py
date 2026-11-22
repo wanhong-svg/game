@@ -61,18 +61,22 @@ def read_selection_slip(source: str) -> SlipSnapshot:
     teams = re.split(r"\s+VS\s+", matchup, maxsplit=1, flags=re.I)
     if len(teams) != 2:
         raise ValueError("注单面板赛事队伍格式无法识别")
-    selection_line = next((x for x in values if re.search(r"\([^)]*\)\s*.+[+\-−]\d+(?:\.\d+)?$", x)), "")
+    selection_line = next((x for x in values if re.search(r"^\([^)]*\)\s*.+$", x)), "")
     score = ""
-    selection_text = selection_line
+    selection_text = ""
     line = ""
     if selection_line:
         score_match = re.search(r"\((\d{1,3}:\d{1,3})\)", selection_line)
         score = score_match.group(1) if score_match else ""
-        line_match = re.search(r"([+\-−]\d+(?:\.\d+)?)$", selection_line)
-        line = line_match.group(1).replace("−", "-") if line_match else ""
-        selection_text = re.sub(r"^\([^)]*\)\s*", "", selection_line)
-    if not market or not league or not odds or not line:
-        raise ValueError("注单面板字段不完整：需要联赛、盘口、赔率和盘口数值")
+        selection_text = re.sub(r"^\([^)]*\)\s*", "", selection_line).strip()
+        if market in {"全场让分", "全场让球"}:
+            line_match = re.search(r"([+\-−]\d+(?:\.\d+)?)$", selection_text)
+            line = line_match.group(1).replace("−", "-") if line_match else ""
+        elif market == "全场大小":
+            line_match = re.search(r"(\d+(?:\.\d+)?)$", selection_text)
+            line = line_match.group(1) if line_match else ""
+    if not market or not league or not odds or not selection_text:
+        raise ValueError("注单面板字段不完整：需要联赛、盘口、赔率和已选项目")
     return SlipSnapshot(league, teams[0].strip(), teams[1].strip(), market,
                         selection_text, line, odds, score)
 
