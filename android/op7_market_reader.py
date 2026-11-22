@@ -47,7 +47,8 @@ def _decimal_text(value: str) -> str:
         raise ValueError(f"赔率格式无效：{value!r}")
 
 
-def _parse_option(desc: str, current_market: str) -> Optional[MarketOption]:
+def _parse_option(desc: str, current_market: str,
+                  current_market_label: str) -> Optional[MarketOption]:
     lines = [x.strip() for x in desc.splitlines() if x.strip()]
     if not lines or not current_market:
         return None
@@ -69,7 +70,7 @@ def _parse_option(desc: str, current_market: str) -> Optional[MarketOption]:
     if current_market == "FULL_TIME_TOTAL" and not line:
         return None
     return MarketOption(
-        market_label=next(k for k, v in MARKETS.items() if v == current_market),
+        market_label=current_market_label,
         market_type=current_market,
         selection=selection,
         line=line,
@@ -82,6 +83,7 @@ def read_market_options(source: str) -> list[MarketOption]:
     """Read market sections by heading labels and their adjacent option controls."""
     root = ET.fromstring(source)
     current_market = ""
+    current_market_label = ""
     output = []
     for node in root.iter():
         desc = node.attrib.get("content-desc", "").strip()
@@ -91,9 +93,10 @@ def read_market_options(source: str) -> list[MarketOption]:
         detected = next((kind for heading, kind in MARKETS.items() if normalized == _norm(heading)), None)
         if detected:
             current_market = detected
+            current_market_label = label
             continue
         if current_market and label:
-            option = _parse_option(label, current_market)
+            option = _parse_option(label, current_market, current_market_label)
             if option:
                 output.append(option)
     return output
