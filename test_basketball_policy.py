@@ -7,7 +7,7 @@ from basketball_policy import load_config, normalize_rows, DEFAULT_CONFIG, EXPEC
 class BasketballPolicyTests(unittest.TestCase):
     def setUp(self):
         self.payload = {
-            "events": [{"venue":"EB","event_id":"e1","sport":"篮球","league":"NBA","home":"A","away":"B"}],
+            "events": [{"venue":"EB","event_id":"e1","sport":"篮球","league":"La Boulangère Wonderligue","home":"A","away":"B"}],
             "markets": [
                 {"venue":"EB","event_id":"e1","play_id_hpid":39,"selections":[{"selection":"A","decimal_odds":"1.91"}]},
                 {"venue":"EB","event_id":"e1","play_id_hpid":38,"selections":[{"selection":"over","decimal_odds":"1.95"}]},
