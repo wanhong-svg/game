@@ -91,17 +91,25 @@ def parse_search_results(source: str) -> list[EventSnapshot]:
         matchup = re.search(r"(.+?)\s+VS\s+(.+)$", flat, re.I)
         if not matchup:
             continue
-        prefix = flat[:matchup.start()].strip()
+        left = matchup.group(1).strip()
         progress_match = re.search(
-            r"(第[一二三四五六七八九十\d]+节|第[一二三四五六七八九十\d]+局|上半场|下半场|加时)\s+(\d{1,2}:\d{2})\s*$",
-            prefix,
+            r"(第[一二三四五六七八九十\d]+节|第[一二三四五六七八九十\d]+局|上半场|下半场|加时)\s+(\d{1,2}:\d{2})\s+(.+)$",
+            left,
         )
-        kickoff_match = re.search(r"\b\d{1,2}-\d{1,2}\s+\d{1,2}:\d{2}\s*$", prefix)
+        kickoff_match = re.search(r"\b\d{1,2}-\d{1,2}\s+\d{1,2}:\d{2}\s+(.+)$", left)
         marker = progress_match or kickoff_match
-        league = prefix[:marker.start()].strip() if marker else prefix
+        if marker:
+            league = left[:marker.start()].strip()
+            home = marker.group(3) if progress_match else marker.group(1)
+        else:
+            # Scheduled rows may expose only competition followed by the matchup.
+            league = left
+            home = left
         period = progress_match.group(1) if progress_match else ""
         clock = progress_match.group(2) if progress_match else ""
-        event = EventSnapshot(league, matchup.group(1).strip(), matchup.group(2).strip(),
+        if not marker:
+            continue
+        event = EventSnapshot(league, home.strip(), matchup.group(2).strip(),
                               None, None, period, clock, desc)
         key = (norm(league), norm(event.home), norm(event.away), period, clock)
         if key not in seen:
