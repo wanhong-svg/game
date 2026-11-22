@@ -69,14 +69,14 @@ python3 scripts/dual_platform_monitor.py
 
 ## 尚未接入真实环境的部分
 
-当前仓库证据尚未提供 Pingbo 登录 URL、赛事搜索控件/结果 DOM、赔率列表 DOM，也没有 OP7 当前搜索结果和盘口控件的实机快照。因此：
+当前仓库已有 Pingbo 赛事列表接口，但尚未取得 OP7 Android 端真实赛事列表响应的实机样本，也没有 OP7/Pingbo 盘口控件的实机快照。因此：
 
 - 目前双端启动、手动登录确认和离线核心逻辑已经建立。
 - Pingbo 赛事列表接口已接入，使用现有 `op7_fb_eb_pingbo_live_refresh.py` 的请求白名单、响应解码与 `op7_fb_eb_venue_mapper.py` 的赛事解析逻辑。
 - Pingbo 赛事列表会在登录确认后获取并保存到 SQLite 快照。
 - OP7 Android 端赛事列表的实机数据来源仍需接入；因此跨端唯一匹配尚未在真实环境端到端完成。
 - OP7/Pingbo 的三类盘口字段映射及真实页面持续赔率采集仍待实机验证。
-- 不猜测站点 URL、CSS selector、Android resource-id 或网络接口；需用脱敏页面结构/控件树确认后实现平台适配器。
+- 不猜测 OP7 Android 的接口 URL、字段或 resource-id；需用脱敏页面结构/控件树或经确认的只读响应实现 OP7 赛事适配器。
 - 在真实采集适配器接入前，监控循环不应对真实比赛启动；核心比较逻辑可用离线测试数据验证。
 
 ## 离线测试
