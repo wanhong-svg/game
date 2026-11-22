@@ -1,10 +1,15 @@
 import unittest
-from android.op7_event_search import EventSnapshot, same_live_event
+from android.op7_event_search import EventSnapshot, same_live_event, _xpath_literal
 from android.op7_market_reader import find_unique_option, MarketOption
 from android.op7_selection_verifier import ExpectedSelection, SlipSnapshot, verify_selection
 
 
 class Op7UiModuleTests(unittest.TestCase):
+    def test_xpath_literal_handles_both_quote_types(self):
+        self.assertEqual(_xpath_literal("NBA"), "'NBA'")
+        self.assertEqual(_xpath_literal("team's"), '"team\'s"')
+        self.assertEqual(_xpath_literal("a\'b\"c"), "concat('a', \"'\", 'b\"c')")
+
     def test_same_live_event_requires_competition_teams_period_and_score(self):
         a = EventSnapshot("NBA", "萨克拉门托国王", "波士顿凯尔特人", 30, 37, "第二节", "08:08")
         b = EventSnapshot("NBA", "波士顿凯尔特人", "萨克拉门托国王", 37, 30, "第二节", "07:58")
