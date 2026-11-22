@@ -27,6 +27,17 @@ class Op7UiModuleTests(unittest.TestCase):
                     home="萨克拉门托国王", away="波士顿凯尔特人")
         self.assertEqual(selected.league, "NBA")
 
+    def test_search_result_matches_league_alias_and_team_order_or_abbreviation(self):
+        events = [
+            EventSnapshot("英格兰超级联赛", "阿森纳", "曼城"),
+            EventSnapshot("英格兰超级联赛", "曼城", "利兹联"),
+            EventSnapshot("英格兰联赛杯", "曼城", "布拉德福德城"),
+        ]
+        selected = find_unique_search_result(
+            events, league="英超", home="曼城", away="阿森纳"
+        )
+        self.assertEqual((selected.home, selected.away), ("阿森纳", "曼城"))
+
     def test_live_event_requires_clock_and_rejects_large_progress_gap(self):
         base = EventSnapshot("NBA", "国王", "凯尔特人", 30, 37, "第二节", "08:08")
         self.assertFalse(same_live_event(base,
