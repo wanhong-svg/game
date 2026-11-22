@@ -1,0 +1,13 @@
+{
+  "_notice": "Template only. Do not use until paths are confirmed against a redacted real OP7 Android response.",
+  "events_path": "data.events",
+  "fields": {
+    "event_id": "id",
+    "league": "league.name",
+    "sport": "sport.name",
+    "home": "home.name",
+    "away": "away.name",
+    "start_time_ms": "startTime",
+    "raw_status": "status"
+  }
+}
