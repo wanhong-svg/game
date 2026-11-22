@@ -130,3 +130,22 @@ export APPIUM_SERVER_URL=http://127.0.0.1:4723
 export ANDROID_UDID=emulator-5554
 export OP7_APP_PACKAGE=com.seaapp.prod
 ```
+
+
+## 9. 从 Android 模拟器抓取 OP7 网络流量（接口发现）
+
+运行前确保模拟器已启动、OP7 已登录，并停留在赛事列表页面。执行：
+
+```bash
+python3 scripts/capture_op7_network.py --duration 90
+```
+
+脚本会检查设备、APP 包名及模拟器内的 `tcpdump`，将抓包保存到本机 `/tmp/op7-network-时间戳.pcap`。抓包期间请在 OP7 中打开或刷新赛事列表。也可指定输出路径：
+
+```bash
+python3 scripts/capture_op7_network.py --duration 90 --output /tmp/op7-events.pcap
+```
+
+**能力边界：** 这是模拟器网络接口的 PCAP 抓取，不是已解密的 HTTP 请求/响应。HTTPS 的 URL path、请求体和赛事 JSON 仍受 TLS 加密保护；脚本不会绕过证书固定、TLS 或设备安全机制。当前抓取范围可能包含模拟器内其他 APP 的网络流量，PCAP 也可能含敏感元数据，请仅在本机检查，不要提交到 Git 或直接公开。
+
+如果 OP7 是可调试构建，优先使用 Android Studio Network Inspector 查看该进程的请求与响应；否则请使用应用开发方提供的调试日志/API 文档。只有在合法授权且调试构建明确允许的情况下，才能进一步取得明文响应。确认真实赛事列表请求后，再将其 host/path/method 和响应字段映射接入 `android/op7_event_adapter.py`。不要把 Cookie、Authorization、Token、签名或完整请求头保存到仓库。
