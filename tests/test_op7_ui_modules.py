@@ -78,6 +78,31 @@ class Op7UiModuleTests(unittest.TestCase):
         self.assertEqual(find_unique_option(options, market_type="FULL_TIME_MONEYLINE",
                          selection="客").odds, "1.25")
 
+    def test_parse_real_op7_market_labels_with_probability_and_split_lines(self):
+        xml = """<hierarchy>
+          <node text="全场独赢" />
+          <node text="主\\n1.96\\n46.99%" />
+          <node text="平局\\n3.50\\n26.31%" />
+          <node text="客\\n3.45\\n26.70%" />
+          <node text="全场让球" />
+          <node text="主 -0.5\\n0.96\\n48.94%" />
+          <node text="客 +0.5\\n0.92\\n51.06%" />
+          <node text="主 -0/0.5\\n0.71\\n62.83%" />
+          <node text="客 +0/0.5\\n1.20\\n37.17%" />
+          <node text="全场大小" />
+          <node text="大 2.5/3\\n0.96\\n48.39%" />
+          <node text="小 2.5/3\\n0.90\\n51.61%" />
+          <node text="大 2.5\\n0.74\\n60.43%" />
+        </hierarchy>"""
+        options = read_market_options(xml)
+        self.assertEqual(len(options), 10)
+        self.assertEqual(find_unique_option(options, market_type="FULL_TIME_MONEYLINE",
+                         selection="主").odds, "1.96")
+        self.assertEqual(find_unique_option(options, market_type="FULL_TIME_HANDICAP",
+                         selection="主", line="-0/0.5").odds, "0.71")
+        self.assertEqual(find_unique_option(options, market_type="FULL_TIME_TOTAL",
+                         selection="大", line="2.5/3").odds, "0.96")
+
     def test_read_slip_fields_from_op7_accessibility_tree(self):
         xml = """<hierarchy>
           <node content-desc="全场让分" />
