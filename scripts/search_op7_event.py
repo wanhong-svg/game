@@ -21,6 +21,9 @@ sys.path.insert(0, str(ROOT))
 from android.appium_session import (  # noqa: E402
     DEFAULT_PACKAGE, DEFAULT_SERVER_URL, DEFAULT_UDID, close_driver, create_driver,
 )
+from android.op7_event_search import (  # noqa: E402
+    _xpath_literal, find_unique_search_result, parse_detail_event, parse_search_results,
+)
 
 SEARCH_TERMS = ("search", "搜索", "赛事", "球队", "联赛")
 
@@ -49,7 +52,7 @@ def inspect_search_controls(driver) -> tuple[list[dict], list[dict]]:
             "bounds": attrs.get("bounds", ""),
         }
         editable = attrs.get("class", "").endswith(("EditText", "AutoCompleteTextView"))
-        if editable and _search_related(node):
+        if editable:
             fields.append(item)
         elif item["clickable"] and _search_related(node):
             launchers.append(item)
@@ -69,6 +72,9 @@ def main() -> int:
     parser.add_argument("--search-field-id", help="Exact Android resource-id of the search input")
     parser.add_argument("--search-trigger-id", help="Exact resource-id of the search icon/button, if it first opens the input")
     parser.add_argument("--wait", type=float, default=2, help="Seconds to wait after search submission")
+    parser.add_argument("--league", help="Exact competition label used to select a result")
+    parser.add_argument("--home", help="Home team name used with --league/--away")
+    parser.add_argument("--away", help="Away team name used with --league/--home")
     parser.add_argument("--submit", choices=("enter", "none"), default="enter",
                         help="Submit with keyboard Enter, or leave the query in the field")
     args = parser.parse_args()
@@ -101,10 +107,17 @@ def main() -> int:
                       "若搜索图标需要先点击以展开输入框，传入 --search-trigger-id。", file=sys.stderr)
                 return 2
             resource_id = fields[0]["resource_id"]
-            if not resource_id:
-                print("搜索输入框没有 resource-id，不能安全定位；请检查控件树后补充专用定位方式。", file=sys.stderr)
-                return 2
-            field = _find_by_resource_id(driver, resource_id)
+            if resource_id:
+                field = _find_by_resource_id(driver, resource_id)
+            else:
+                visible_fields = [
+                    item for item in driver.find_elements(AppiumBy.CLASS_NAME, "android.widget.EditText")
+                    if item.is_displayed()
+                ]
+                if len(visible_fields) != 1:
+                    print(f"可见 EditText 数量为 {len(visible_fields)}，拒绝猜测搜索框。", file=sys.stderr)
+                    return 2
+                field = visible_fields[0]
 
         field.click()
         try:
@@ -120,6 +133,31 @@ def main() -> int:
             print("Query left in the search field; not submitted.")
         time.sleep(args.wait)
         print(f"Search finished waiting; activity={driver.current_activity}")
+        events = parse_search_results(driver.page_source)
+        print(f"Parsed search results: {len(events)}")
+        for index, event in enumerate(events, 1):
+            print(f"[{index}] league={event.league} | {event.home} VS {event.away} | "
+                  f"period={event.period or '-'} | clock={event.clock or '-'}")
+        selectors = (args.league, args.home, args.away)
+        if any(selectors) and not all(selectors):
+            print("--league、--home、--away 必须同时提供。", file=sys.stderr)
+            return 2
+        if all(selectors):
+            selected = find_unique_search_result(
+                events, league=args.league, home=args.home, away=args.away
+            )
+            matches = driver.find_elements(
+                AppiumBy.XPATH,
+                f"//*[@content-desc={_xpath_literal(selected.event_label)}]"
+            )
+            if len(matches) != 1:
+                raise ValueError(f"目标赛事行匹配到 {len(matches)} 个控件，拒绝点击")
+            matches[0].click()
+            time.sleep(args.wait)
+            detail = parse_detail_event(driver.page_source)
+            print("Selected event detail:")
+            print(f"league={detail.league} | {detail.home} {detail.home_score} - "
+                  f"{detail.away_score} {detail.away} | period={detail.period} | clock={detail.clock}")
         return 0
     except Exception as exc:
         print(f"OP7 search failed: {type(exc).__name__}: {exc}", file=sys.stderr)
