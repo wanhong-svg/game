@@ -98,6 +98,12 @@ def validate_event_list(rows, source):
 def save_latest(out,name,payload,status='SUCCESS',details=None):
  out.mkdir(parents=True,exist_ok=True)
  stamp=now()
+ if status == 'SUCCESS' and isinstance(payload,list) and not payload:
+  status='EMPTY'
+  status_payload={'status':status,'observed_at_utc':stamp,'details':details or {},
+                  'error':'empty result; previous latest snapshot preserved'}
+  (out/(name+'_status.json')).write_text(json.dumps(status_payload,ensure_ascii=False,indent=2),encoding='utf-8')
+  return
  p=out/(name+'_latest.json')
  tmp=p.with_suffix('.tmp')
  tmp.write_text(json.dumps({'status':status,'fetched_at_utc':stamp,'data':payload,'details':details or {}},ensure_ascii=False,indent=2),encoding='utf-8')
