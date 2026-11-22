@@ -71,7 +71,7 @@ class Op7UiModuleTests(unittest.TestCase):
         xml = """<hierarchy>
           <node content-desc="全场让分" />
           <node content-desc="NBA" />
-          <node content-desc="0.88" />
+          <node content-desc="@" /><node content-desc="0.88" />
           <node content-desc="(30:37) 萨克拉门托国王+11.5" />
           <node content-desc="萨克拉门托国王 VS 波士顿凯尔特人" />
         </hierarchy>"""
@@ -93,7 +93,7 @@ class Op7UiModuleTests(unittest.TestCase):
     def test_slip_verifier_supports_moneyline_and_total(self):
         moneyline_xml = """<hierarchy>
           <node content-desc="全场独赢" /><node content-desc="NBA" />
-          <node content-desc="1.25" />
+          <node content-desc="@" /><node content-desc="1.25" />
           <node content-desc="(30:37) 波士顿凯尔特人" />
           <node content-desc="萨克拉门托国王 VS 波士顿凯尔特人" />
         </hierarchy>"""
@@ -103,7 +103,7 @@ class Op7UiModuleTests(unittest.TestCase):
 
         total_xml = """<hierarchy>
           <node content-desc="全场大小" /><node content-desc="NBA" />
-          <node content-desc="1.87" />
+          <node content-desc="@" /><node content-desc="1.87" />
           <node content-desc="(30:37) 大 208.5" />
           <node content-desc="萨克拉门托国王 VS 波士顿凯尔特人" />
         </hierarchy>"""
