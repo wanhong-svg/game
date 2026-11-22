@@ -94,9 +94,13 @@ def load_config(path):
 def classify_league(event, cfg):
     raw = norm(event.get("league"))
     aliases = cfg.get("event_filter", {}).get("league_aliases", {})
+    if not raw:
+        return None
     for canonical in cfg.get("event_filter", {}).get("basketball_whitelist", ["NBA", "KBL"]):
         names = [canonical] + aliases.get(canonical, [])
-        if any(norm(x) in raw or raw in norm(x) for x in names if norm(x)):
+        # Exact normalized aliases only: substring matching can classify an
+        # unrelated league (or a blank value) as NBA/KBL.
+        if raw in {norm(x) for x in names if norm(x)}:
             return canonical
     return None
 
