@@ -17,12 +17,12 @@ SITES={
  'FB_ORIGIN':'https://api.738z3.com',
  'EB_ORIGIN':'https://api.r4bud5u7.com',
  'PINGBO_WEB':'https://www.pin135.com/',
- 'PINGBO_ORIGIN':'https://www.part567.com',
+ 'PINGBO_ORIGIN':'https://www.pin135.com',
 }
 ALLOW={
  'api.738z3.com':{'/v1/match/getList','/v1/match/getMatchDetail'},
  'api.r4bud5u7.com':{'/yewu11/v1/m/matchesPagePB','/yewu11/v1/m/matchDetail/getMatchOddsInfoPB'},
- 'www.part567.com':{'/sports-service/sv/compact/events'},
+ 'www.pin135.com':{'/sports-service/sv/compact/events'},
 }
 
 def now(): return datetime.now(timezone.utc).isoformat(timespec='milliseconds')
@@ -59,7 +59,7 @@ def request_json(ctx,url,method,headers,params=None,body=None,timeout_ms=15000):
  if method=='GET': r=ctx.request.get(url,headers=headers,timeout=timeout_ms)
  else: r=ctx.request.post(url,headers=headers,data=body or {},timeout=timeout_ms)
  if r.status in (401,403):
-  site='pingbo' if p.netloc=='www.part567.com' else 'op7'
+  site='pingbo' if p.netloc=='www.pin135.com' else 'op7'
   raise AuthenticationRequired(site,r.status,f'{p.netloc}{p.path}')
  if not r.ok: raise RuntimeError(f'HTTP {r.status} from {p.netloc}{p.path}')
  return unwrap(r.json())
@@ -118,7 +118,7 @@ def setup_session(site,profiles_dir):
     input(f'请确认 {label} 已成功登录并进入正常业务页面，然后回到终端按 Enter 保存本地会话；若未成功登录请不要按 Enter：')
     cookies=ctx.cookies()
     domains=[c.get('domain','') for c in cookies]
-    relevant=[d for d in domains if ('op7.io' in d or '738z3.com' in d or 'r4bud5u7.com' in d)] if key=='op7' else [d for d in domains if ('pin135.com' in d or 'part567.com' in d)]
+    relevant=[d for d in domains if ('op7.io' in d or '738z3.com' in d or 'r4bud5u7.com' in d)] if key=='op7' else [d for d in domains if ('pin135.com' in d or 'pin135.com' in d)]
     print(f'{label}：浏览器配置已保存在 {profile}。当前 Cookie 数量 {len(cookies)}，相关域 Cookie 数量 {len(relevant)}。')
     if not relevant:
      print('警告：未发现相关域 Cookie；若站点使用其他存储方式，会话仍可能已保存。请用后台刷新验证，若返回 401/403 请重新登录。')
