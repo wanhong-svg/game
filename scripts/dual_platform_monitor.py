@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Start both user-facing sessions and guide the read-only monitoring workflow."""
+"""Start OP7 + Pingbo sessions and fetch Pingbo events via the existing API."""
 from __future__ import annotations
 
 import argparse
@@ -12,7 +12,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from dual_platform.sessions import launch_dual_sessions, wait_for_manual_login
-from dual_platform.core import AuditStore\nfrom dual_platform.pingbo_events import fetch_pingbo_events
+from dual_platform.core import AuditStore
+from dual_platform.pingbo_events import fetch_pingbo_events
 
 
 def prompt_pingbo_url() -> str:
@@ -28,7 +29,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Launch OP7 Android + Pingbo browser sessions")
     parser.add_argument("--pingbo-url", default=os.getenv("PINGBO_URL"),
                         help="Optional Pingbo login URL; omitted means prompt in terminal")
-    parser.add_argument("--db", default="dual_platform_monitor.sqlite3")\n    parser.add_argument("--refresh-config", default="refresh_config.json",\n                        help="Local config containing part567.events_params; falls back to refresh_config.example.json")
+    parser.add_argument("--db", default="dual_platform_monitor.sqlite3")
+    parser.add_argument("--refresh-config", default="refresh_config.json",
+                        help="Local config containing part567.events_params; falls back to refresh_config.example.json")
     parser.add_argument("--headless", action="store_true",
                         help="Launch browser headless (not recommended for manual login)")
     args = parser.parse_args()
@@ -41,14 +44,32 @@ def main() -> int:
             raise ValueError("--pingbo-url 必须是完整的 http:// 或 https:// 地址")
         session = launch_dual_sessions(pingbo_url, headless=args.headless)
         wait_for_manual_login(session)
+
         store = AuditStore(args.db)
-        print("双端会话已就绪。下一阶段需要从实际页面确认赛事搜索控件与结果结构。")
-        print("当前版本不会自动提交投注，也不会猜测未确认的页面选择器/API。")
+        print("\n双端登录已由用户确认。")
+        print("正在调用现有 Pingbo 赛事列表接口 /sports-service/sv/compact/events ...")
+        pingbo_snapshot = fetch_pingbo_events(
+            session.context, config_path=args.refresh_config
+        )
+        store.save_snapshot(pingbo_snapshot)
+
+        print(f"Pingbo 接口获取成功：{pingbo_snapshot['count']} 场赛事")
+        for event in pingbo_snapshot["events"][:30]:
+            print(
+                f"  [{event['event_id']}] {event['home']} vs {event['away']} "
+                f"| 开赛={event['start_time_utc'] or '接口未提供'}"
+            )
+        if pingbo_snapshot["count"] > 30:
+            print(f"  ... 另有 {pingbo_snapshot['count'] - 30} 场未展开显示")
+
+        print("Pingbo 赛事数据已写入 SQLite。")
+        print("下一步将接入 OP7 赛事列表来源，再执行系统唯一匹配。")
+        print("当前程序仅读取赛事数据，不会自动提交投注。")
         print(f"审计数据库：{args.db}")
         input("按 Enter 关闭双端会话：")
         return 0
     except KeyboardInterrupt:
-        print("\\n用户中断。")
+        print("\n用户中断。")
         return 130
     except Exception as exc:
         print(f"启动失败：{type(exc).__name__}: {exc}", file=sys.stderr)
