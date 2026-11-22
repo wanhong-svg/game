@@ -49,7 +49,7 @@ def _decimal_text(value: str) -> str:
 
 def _parse_option(desc: str, current_market: str,
                   current_market_label: str) -> Optional[MarketOption]:
-    # Android XML normalizes newlines inside content-desc attributes to spaces.
+    # Text values may contain line breaks; normalize only for parsing.
     flat = re.sub(r"\s+", " ", desc).strip()
     if not flat or not current_market:
         return None
@@ -57,17 +57,17 @@ def _parse_option(desc: str, current_market: str,
     # e.g. "主 -0.5 0.96 48.94%". Remove the trailing percentage first;
     # otherwise it is mistaken for the odds.
     without_probability = re.sub(
-        r"\\s+\\d+(?:\\.\\d+)?\\s*%\\s*$", "", flat
+        r"\s+\d+(?:\.\d+)?\s*%\s*$", "", flat
     ).strip()
     odds_matches = list(
-        re.finditer(r"(?<![\\d.])(\\d+\\.\\d{1,4})(?![\\d.])", without_probability)
+        re.finditer(r"(?<![\d.])(\d+\.\d{1,4})(?![\d.])", without_probability)
     )
     if not odds_matches:
         return None
     odds_match = odds_matches[-1]
     odds = _decimal_text(odds_match.group(1))
     label = without_probability[:odds_match.start()].strip()
-    label = re.sub(r"\\s+", " ", label).strip()
+    label = re.sub(r"\s+", " ", label).strip()
     selection_match = re.fullmatch(
         r"(主队?|客队?|主|客|大|小|Over|Under)\s*([+\-−＋]?\s*\d+(?:\.\d+)?(?:/\d+(?:\.\d+)?)?)?",
         label, re.I
@@ -96,9 +96,9 @@ def read_market_options(source: str) -> list[MarketOption]:
     current_market_label = ""
     output = []
     for node in root.iter():
-        desc = node.attrib.get("content-desc", "").strip()
-        text = node.attrib.get("text", "").strip()
-        label = desc or text
+        # OP7 detail-page fields are exposed in the native "text" attribute.
+        # Do not use bounds: scrolling changes their screen coordinates.
+        label = node.attrib.get("text", "").strip()
         normalized = _norm(label)
         detected = next((kind for heading, kind in MARKETS.items() if normalized == _norm(heading)), None)
         if detected:
