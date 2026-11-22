@@ -47,9 +47,9 @@ def parse_detail_event(source: str) -> EventSnapshot:
             # Header commonly exposes: home, period, clock, score, away.
             score_index = next((i for i, x in enumerate(lines) if _score_pair(x) != (None, None)), None)
             if score_index is not None and score_index >= 1 and score_index + 1 < len(lines):
-                period_clock = lines[score_index - 1]
-                period_match = re.search(r"(第[一二三四五六七八九十\d]+节|第[一二三四五六七八九十\d]+局|上半场|下半场|加时)", period_clock)
-                clock_match = re.search(r"\b\d{1,2}:\d{2}\b", period_clock)
+                progress_text = " ".join(lines[1:score_index])
+                period_match = re.search(r"(第[一二三四五六七八九十\d]+节|第[一二三四五六七八九十\d]+局|上半场|下半场|加时)", progress_text)
+                clock_match = re.search(r"\b\d{1,2}:\d{2}\b", progress_text)
                 hs, aws = _score_pair(lines[score_index])
                 candidates.append(EventSnapshot(
                     league="", home=lines[0], away=lines[score_index + 1],
