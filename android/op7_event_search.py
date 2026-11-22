@@ -102,8 +102,10 @@ def parse_search_results(source: str) -> list[EventSnapshot]:
                 period = pm.group(1)
             if cm:
                 clock = cm.group(0)
-        hs, aws = _score_pair(desc)
-        event = EventSnapshot(league, teams[0].strip(), teams[1].strip(), hs, aws, period, clock, desc)
+        # Search rows may contain kickoff dates such as 11-22; scores are
+        # authoritative only on the live event detail header.
+        event = EventSnapshot(league, teams[0].strip(), teams[1].strip(),
+                              None, None, period, clock, desc)
         key = (norm(league), norm(event.home), norm(event.away), hs, aws, period, clock)
         if key not in seen:
             results.append(event)
