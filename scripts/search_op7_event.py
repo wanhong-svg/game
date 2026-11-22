@@ -194,6 +194,92 @@ def _is_selected(driver, label: str, element) -> bool | None:
     return _selected_state(element)
 
 
+def _has_visible_control(driver, label: str) -> bool:
+    try:
+        element = _control_by_label(driver, label)
+        return element.is_displayed()
+    except Exception:
+        return False
+
+
+def _search_overlay_open(driver) -> bool:
+    """Identify the OP7 search modal from its visible labels and search field."""
+    try:
+        root = ET.fromstring(driver.page_source)
+    except ET.ParseError:
+        return False
+    texts = " ".join(
+        " ".join((node.attrib.get("text", ""), node.attrib.get("content-desc", ""))).strip()
+        for node in root.iter()
+    )
+    has_cancel = any(
+        node.attrib.get("clickable") == "true"
+        and (node.attrib.get("text", "").strip() == "取消"
+             or node.attrib.get("content-desc", "").strip() == "取消")
+        for node in root.iter()
+    )
+    has_search_tabs = "筛选" in texts and "搜索" in texts
+    has_input = any(
+        node.attrib.get("class", "").endswith(("EditText", "AutoCompleteTextView"))
+        for node in root.iter()
+    )
+    return has_cancel and has_search_tabs and has_input
+
+
+def _click_cancel_if_present(driver, wait: float) -> bool:
+    """Dismiss a visible search/modal overlay only through its labelled 取消 action."""
+    xpath = (
+        f"//*[@clickable='true' and (@text={_xpath_literal('取消')} "
+        f"or @content-desc={_xpath_literal('取消')})]"
+    )
+    matches = driver.find_elements(AppiumBy.XPATH, xpath)
+    visible = [item for item in matches if item.is_displayed()]
+    if len(visible) != 1:
+        return False
+    visible[0].click()
+    time.sleep(wait)
+    print("检测到弹层，已点击「取消」并等待页面返回。")
+    return True
+
+
+def _is_home_navigation_visible(driver) -> bool:
+    """Treat the main five-item bottom navigation as the home-screen marker."""
+    labels = ("发现", "娱乐", "体育", "注单", "我的")
+    return sum(_has_visible_control(driver, label) for label in labels) >= 3
+
+
+def recover_navigation_page(driver, target_label: str, wait: float = 1.5) -> None:
+    """Close an accidental search overlay and return to home before menu navigation."""
+    if _search_overlay_open(driver):
+        print("菜单切换期间检测到搜索弹层，启动页面恢复流程。")
+        _click_cancel_if_present(driver, wait)
+
+    if _has_visible_control(driver, target_label):
+        print(f"页面恢复后已找到目标功能「{target_label}」，继续菜单切换。")
+        return
+
+    print(f"当前页面未找到目标功能「{target_label}」，尝试逐级返回主页。")
+    for step in range(1, 9):
+        if _is_home_navigation_visible(driver):
+            break
+        # If another search/modal layer is exposed during back navigation,
+        # prefer its explicit 取消 control before using Android Back.
+        if _search_overlay_open(driver):
+            if _click_cancel_if_present(driver, wait):
+                continue
+        driver.back()
+        time.sleep(wait)
+        print(f"已执行第 {step} 次返回并等待 {wait:.1f}s。")
+
+    if not _is_home_navigation_visible(driver):
+        raise RuntimeError("最多返回 8 层仍无法确认主页导航，停止操作以避免误点。")
+    if not _has_visible_control(driver, target_label):
+        raise RuntimeError(
+            f"已返回主页，但仍未找到目标功能「{target_label}」，停止后续菜单切换。"
+        )
+    print(f"已确认返回主页，并找到目标功能「{target_label}」。")
+
+
 def ensure_selected(driver, label: str, wait: float = 1.5) -> None:
     """Select a navigation tab, wait for rendering, then verify its active state.
 
@@ -224,6 +310,9 @@ def ensure_selected(driver, label: str, wait: float = 1.5) -> None:
 
 def prepare_op7_page(driver, sport: str, wait: float = 1.5) -> None:
     """Select 体育 -> EB -> requested sport, waiting and verifying each step."""
+    # Recover from an accidentally opened search/filter sheet before following
+    # the configured navigation route. The target function for this route is 体育.
+    recover_navigation_page(driver, "体育", wait)
     ensure_selected(driver, "体育", wait)
     ensure_selected(driver, "EB", wait)
     sport_label = {"football": "足球", "basketball": "篮球"}[sport]
