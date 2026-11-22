@@ -43,7 +43,6 @@ def main() -> int:
         if session:
             try:
                 session.close()
-                session._playwright.stop()
             except Exception:
                 pass
 
