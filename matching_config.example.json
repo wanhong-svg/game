@@ -1,10 +1,9 @@
 {
   "event_filter": {
     "soccer_whitelist": ["EPL", "LaLiga", "SerieA", "Bundesliga", "Ligue1", "UCL"],
-    "basketball_whitelist": ["NBA", "KBL"],
+    "basketball_whitelist": ["FRANCE_WOMEN_LFB"],
     "league_aliases": {
-      "NBA": ["NBA", "National Basketball Association"],
-      "KBL": ["KBL", "Korean Basketball League", "Korea Basketball League", "韩国篮球联赛", "韩国职业篮球联赛"]
+      "FRANCE_WOMEN_LFB": ["LFB", "Ligue Féminine de Basket", "Ligue Feminine de Basket", "La Boulangère Wonderligue", "La Boulangere Wonderligue", "Wonderligue", "Ligue Féminine de Basketball", "France Women's Basketball League", "法国女子篮球联赛"]
     }
   },
   "platforms": {
