@@ -65,6 +65,8 @@ def inspect_search_controls(driver) -> tuple[list[dict], list[dict]]:
             "hint": attrs.get("hint", ""),
             "clickable": attrs.get("clickable", "false") == "true",
             "bounds": attrs.get("bounds", ""),
+            "selected": attrs.get("selected", ""),
+            "checked": attrs.get("checked", ""),
         }
         editable = attrs.get("class", "").endswith(("EditText", "AutoCompleteTextView"))
         if editable:
@@ -98,6 +100,59 @@ def inspect_search_controls(driver) -> tuple[list[dict], list[dict]]:
         launchers.append(item)
     return fields, launchers
 
+def _control_by_label(driver, label: str):
+    """Return exactly one clickable control with the exact accessibility label."""
+    xpath = f"//*[@clickable='true' and @content-desc={_xpath_literal(label)}]"
+    matches = driver.find_elements(AppiumBy.XPATH, xpath)
+    if len(matches) != 1:
+        xpath = f"//*[@clickable='true' and @text={_xpath_literal(label)}]"
+        matches = driver.find_elements(AppiumBy.XPATH, xpath)
+    if len(matches) != 1:
+        raise ValueError(f"控件「{label}」匹配到 {len(matches)} 个，拒绝猜测点击")
+    return matches[0]
+
+
+def _selected_state(element) -> bool | None:
+    """Read explicit accessibility selection state; never infer from color."""
+    selected = element.get_attribute("selected")
+    checked = element.get_attribute("checked")
+    values = [v.strip().lower() for v in (selected, checked) if v is not None and v != ""]
+    if any(v == "true" for v in values):
+        return True
+    if values and all(v == "false" for v in values):
+        return False
+    return None
+
+
+def ensure_selected(driver, label: str, wait: float = 0.5) -> None:
+    """Select a tab only when explicit UI state says it is not selected."""
+    element = _control_by_label(driver, label)
+    state = _selected_state(element)
+    if state is None:
+        raise RuntimeError(
+            f"控件「{label}」没有暴露 selected/checked 状态；"
+            "为避免误切换，已停止。请提供该控件的完整 XML 节点属性。"
+        )
+    if state:
+        print(f"「{label}」已经选中，无需切换。")
+        return
+    print(f"「{label}」当前未选中，执行切换。")
+    element.click()
+    time.sleep(wait)
+    element = _control_by_label(driver, label)
+    if _selected_state(element) is not True:
+        raise RuntimeError(f"点击「{label}」后未能确认其已选中，停止后续操作。")
+    print(f"已确认「{label}」选中。")
+
+
+def prepare_op7_page(driver, sport: str, wait: float = 0.5) -> None:
+    """Ensure bottom 体育 tab, top EB provider, then the requested sport."""
+    ensure_selected(driver, "体育", wait)
+    ensure_selected(driver, "EB", wait)
+    sport_label = {"football": "足球", "basketball": "篮球"}[sport]
+    ensure_selected(driver, sport_label, wait)
+
+
 def _find_by_resource_id(driver, resource_id: str):
     return driver.find_element(AppiumBy.ID, resource_id)
 
@@ -105,6 +160,8 @@ def _find_by_resource_id(driver, resource_id: str):
 def main() -> int:
     parser = argparse.ArgumentParser(description="Search an event in the OP7 Android app")
     parser.add_argument("--event", required=True, help="Event/team/league name to search")
+    parser.add_argument("--sport", choices=("football", "basketball"), default="basketball",
+                        help="Sport tab to select before searching (default: basketball)")
     parser.add_argument("--server", default=DEFAULT_SERVER_URL)
     parser.add_argument("--udid", default=DEFAULT_UDID)
     parser.add_argument("--package", default=DEFAULT_PACKAGE)
@@ -126,7 +183,9 @@ def main() -> int:
     try:
         driver = create_driver(args.server, args.udid, args.package, no_reset=True)
         print(f"Connected: package={driver.current_package}, activity={driver.current_activity}")
-        print("请确认 APP 当前停留在赛事列表/搜索页面。")
+        print("准备 OP7 页面：体育主菜单 -> EB -> 指定球类。")
+        prepare_op7_page(driver, args.sport, args.wait if args.wait else 0.5)
+        print("页面切换完成，开始识别赛事搜索入口。")
         if args.search_trigger_id:
             _find_by_resource_id(driver, args.search_trigger_id).click()
             time.sleep(0.5)
