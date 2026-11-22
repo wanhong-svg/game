@@ -217,6 +217,7 @@ class AuditStore:
           code TEXT NOT NULL, message TEXT NOT NULL
         );
         """)
+        self.db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_market_lock_event_type ON market_locks(event_key, market_type)")
         self.db.commit()
 
     def save_snapshot(self, payload: dict) -> None:
