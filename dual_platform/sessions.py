@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import os
-import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -15,6 +14,7 @@ class DualSession:
     browser: Any
     context: Any
     page: Any
+    playwright: Any
 
     def close(self) -> None:
         try:
@@ -25,12 +25,12 @@ class DualSession:
                 if self.browser:
                     self.browser.close()
             finally:
-                if self.context:
-                    self.context.close()
+                if self.playwright:
+                    self.playwright.stop()
 
 
 def launch_dual_sessions(pingbo_url: str | None = None, *, headless: bool = False) -> DualSession:
-    """Launch the already-installed OP7 app and a persistent visible browser."""
+    """Connect to the running Android emulator and launch a visible Pingbo browser."""
     url = pingbo_url or os.getenv("PINGBO_URL")
     if not url:
         raise ValueError("请先设置 PINGBO_URL，或通过 --pingbo-url 指定 Pingbo 登录入口")
@@ -45,10 +45,7 @@ def launch_dual_sessions(pingbo_url: str | None = None, *, headless: bool = Fals
         page.goto(url, wait_until="domcontentloaded", timeout=60000)
         print(f"Pingbo 页面已打开：{page.url}")
         print(f"OP7 已连接：package={driver.current_package}, activity={driver.current_activity}")
-        # Keep the Playwright runtime alive for the lifetime of this session.
-        session = DualSession(driver, browser, context, page)
-        session._playwright = playwright
-        return session
+        return DualSession(driver, browser, context, page, playwright)
     except Exception:
         close_driver(driver)
         playwright.stop()
@@ -92,7 +89,6 @@ def wait_for_manual_login(session: DualSession) -> None:
     print(f"Pingbo：{browser_login_state(session.page)}")
     print("请分别在 Android OP7 和 Pingbo 浏览器中手动登录。")
     input("确认两个端都已成功登录后，按 Enter 继续；未成功请勿继续：")
-    # Re-check page availability and require explicit user acknowledgement.
     if not session.op7_driver.current_package:
         raise RuntimeError("OP7 会话不可用，停止后续流程")
     if session.page.is_closed():
