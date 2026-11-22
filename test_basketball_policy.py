@@ -65,6 +65,14 @@ class BasketballPolicyTests(unittest.TestCase):
         state, _ = freshness_state((now - timedelta(seconds=60)).isoformat(), 30, now)
         self.assertEqual(state, "STALE")
 
+    def test_blank_or_partial_league_names_do_not_match_whitelist(self):
+        from basketball_policy import classify_league
+        cfg = json.loads(json.dumps(DEFAULT_CONFIG))
+        self.assertIsNone(classify_league({"league": ""}, cfg))
+        self.assertIsNone(classify_league({"league": None}, cfg))
+        self.assertIsNone(classify_league({"league": "NBA G League"}, cfg))
+        self.assertEqual(classify_league({"league": "NBA"}, cfg), "NBA")
+
     def test_fb_market_requires_fulltime_phase(self):
         cfg = json.loads(json.dumps(DEFAULT_CONFIG))
         row = {"market_type_mty": 3002, "settlement_period_pe": 1002}
