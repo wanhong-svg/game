@@ -76,7 +76,7 @@ def main() -> int:
             options, market_type=args.market_type,
             selection=args.selection, line=args.line,
         )
-        if not event.home_score is not None or event.away_score is None:
+        if event.home_score is None or event.away_score is None:
             raise ValueError("详情页比分不完整，不能核验注单面板")
         expected = ExpectedSelection(
             league=event.league,
