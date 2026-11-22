@@ -9,7 +9,7 @@
 - `op7_fb_eb_pingbo_analysis.json`：本次两份 HAR 的脱敏联合解析结果。
 - `op7_fb_eb_pingbo_report.md`：字段完善及刷新频率分析报告。
 
-## 一、离线抓包分析
+## 平博页面入口\n\n- 平博 PC 页面：`https://www.pin135.com/`。\n- 当前只读刷新器将此地址作为可见浏览器登录入口。赛事读取 API 仍沿用仓库既有 HAR 中确认的 `www.part567.com` 接口；不能仅凭页面域名推断 API 域名。首次验证 pin135 页面后，应重新导出 HAR，核对实际赛事列表接口、请求头与参数，再更新只读白名单。\n\n## 一、离线抓包分析
 
 ```bash
 python op7_fb_eb_venue_mapper.py \
@@ -107,7 +107,7 @@ python op7_fb_eb_pingbo_live_refresh.py --config refresh_config.json --profiles-
 
 ## 五、安全及边界
 
-- 只允许 `api.738z3.com` 的 `getList/getMatchDetail`、`api.r4bud5u7.com` 的 `matchesPagePB/getMatchOddsInfoPB`、`www.pin135.com` 的 `compact/events`。
+- 只允许 `api.738z3.com` 的 `getList/getMatchDetail`、`api.r4bud5u7.com` 的 `matchesPagePB/getMatchOddsInfoPB`、`www.part567.com` 的 `compact/events`（当前仓库基于既有 HAR 记录的 API 域名；pin135.com 页面登录后是否仍调用该域名，需重新抓包确认）。
 - 不会访问任何投注、下单、订单、钱包、充值、提现、cashout 或资金变更接口。
 - 不读取或复用 HAR 中的 Cookie、Token、密码或会话头；使用用户本机正常登录的浏览器配置。不得绕过验证码或 MFA。
 - 若会话过期、接口返回 401/403、站点要求验证码/MFA，应按站点正常流程重新登录。
