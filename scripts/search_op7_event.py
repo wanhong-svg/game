@@ -108,6 +108,13 @@ def _control_by_label(driver, label: str):
         xpath = f"//*[@clickable='true' and @text={_xpath_literal(label)}]"
         matches = driver.find_elements(AppiumBy.XPATH, xpath)
     if len(matches) != 1:
+        # Sport category labels include a live count, such as "篮球\\n12".
+        xpath = (
+            "//*[@clickable='true' and "
+            f"starts-with(normalize-space(@content-desc), {_xpath_literal(label)})]"
+        )
+        matches = driver.find_elements(AppiumBy.XPATH, xpath)
+    if len(matches) != 1:
         raise ValueError(f"控件「{label}」匹配到 {len(matches)} 个，拒绝猜测点击")
     return matches[0]
 
