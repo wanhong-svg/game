@@ -61,7 +61,8 @@ def print_interactive_elements(source: str) -> None:
                 f"[{count}] class={class_name} | "
                 f"text={text!r} | desc={desc!r} | "
                 f"clickable={clickable} | focusable={focusable} | "
-                f"scrollable={scrollable} | bounds={bounds}"
+                f"scrollable={scrollable} | selected={attrs.get('selected', '')} | "
+                f"checked={attrs.get('checked', '')} | bounds={bounds}"
             )
 
     print(f"\nTotal matching elements: {count}")
