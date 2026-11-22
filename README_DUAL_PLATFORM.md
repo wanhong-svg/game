@@ -51,7 +51,7 @@ adb devices -l
 curl http://127.0.0.1:4723/status
 ```
 
-启动程序后，终端会主动询问 Pingbo 网站地址，不需要预先写入配置文件或仓库：
+启动程序后，终端会主动询问 Pingbo 网站地址，不需要预先写入配置文件或仓库。Pingbo 登录后，程序会调用仓库现有的赛事列表接口 `/sports-service/sv/compact/events`，从接口结果提取赛事，不再要求用户在 Pingbo 页面逐场搜索：
 
 ```bash
 python3 scripts/dual_platform_monitor.py
@@ -63,14 +63,19 @@ python3 scripts/dual_platform_monitor.py
 请输入 Pingbo 网站地址（登录入口 URL）：https://你的Pingbo登录入口
 ```
 
-也支持可选参数 `--pingbo-url` 或环境变量 `PINGBO_URL`，但默认流程是在命令行现场输入。程序会连接 OP7、打开 Pingbo 浏览器，输出两端登录状态提示。请手动登录两端，确认成功后在终端按 Enter。
+也支持可选参数 `--pingbo-url` 或环境变量 `PINGBO_URL`，但默认流程是在命令行现场输入。程序会连接 OP7、打开 Pingbo 浏览器，等待用户手动登录并确认。登录后调用现有接口并将赛事列表写入 SQLite。
+
+接口参数优先读取本地 `refresh_config.json` 的 `part567.events_params`；若本地文件不存在，则读取仓库示例配置中的 Pingbo 参数。若站点返回 401/403，请检查登录会话、账号权限及请求头配置。接口域名和路径仍遵守现有脚本白名单，不会把用户输入的网址拼接成任意 API 请求。
 
 ## 尚未接入真实环境的部分
 
 当前仓库证据尚未提供 Pingbo 登录 URL、赛事搜索控件/结果 DOM、赔率列表 DOM，也没有 OP7 当前搜索结果和盘口控件的实机快照。因此：
 
 - 目前双端启动、手动登录确认和离线核心逻辑已经建立。
-- 双端真实赛事搜索结果提取、OP7/Pingbo 的三类盘口字段映射，以及真实页面持续赔率采集尚未宣称完成。
+- Pingbo 赛事列表接口已接入，使用现有 `op7_fb_eb_pingbo_live_refresh.py` 的请求白名单、响应解码与 `op7_fb_eb_venue_mapper.py` 的赛事解析逻辑。
+- Pingbo 赛事列表会在登录确认后获取并保存到 SQLite 快照。
+- OP7 Android 端赛事列表的实机数据来源仍需接入；因此跨端唯一匹配尚未在真实环境端到端完成。
+- OP7/Pingbo 的三类盘口字段映射及真实页面持续赔率采集仍待实机验证。
 - 不猜测站点 URL、CSS selector、Android resource-id 或网络接口；需用脱敏页面结构/控件树确认后实现平台适配器。
 - 在真实采集适配器接入前，监控循环不应对真实比赛启动；核心比较逻辑可用离线测试数据验证。
 
