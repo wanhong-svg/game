@@ -93,7 +93,7 @@ def load_config(path):
 def classify_league(event, cfg):
     raw = norm(event.get("league"))
     aliases = cfg.get("event_filter", {}).get("league_aliases", {})
-    for canonical in cfg.get("event_filter", {}).get("basketball_whitelist", ["NBA", "KBL"]):
+    for canonical in cfg.get("event_filter", {}).get("basketball_whitelist", ["FRANCE_WOMEN_LFB"]):
         names = [canonical] + aliases.get(canonical, [])
         if any(norm(x) in raw or raw in norm(x) for x in names if norm(x)):
             return canonical
@@ -295,7 +295,7 @@ def normalize_rows(payload, cfg):
 def main():
     ap = argparse.ArgumentParser(description="Offline basketball market policy filter; no network or bet actions")
     ap.add_argument("--analysis", required=True, help="JSON output from op7_fb_eb_venue_mapper.py")
-    ap.add_argument("--config", help="matching_config.json; defaults to NBA/KBL including-OT policy")
+    ap.add_argument("--config", help="matching_config.json; defaults to French women's LFB/Wonderligue including-OT policy")
     ap.add_argument("--out", default="basketball_normalized.json")
     args = ap.parse_args()
     payload = json.loads(Path(args.analysis).read_text(encoding="utf-8"))
