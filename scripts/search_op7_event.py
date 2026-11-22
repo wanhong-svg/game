@@ -309,13 +309,23 @@ def ensure_selected(driver, label: str, wait: float = 1.5) -> None:
 
 
 def prepare_op7_page(driver, sport: str, wait: float = 1.5) -> None:
-    """Select 体育 -> EB -> requested sport, waiting and verifying each step."""
-    # Recover from an accidentally opened search/filter sheet before following
-    # the configured navigation route. The target function for this route is 体育.
+    """Prepare the requested sport without dismissing an already-open search sheet."""
+    sport_label = {"football": "足球", "basketball": "篮球"}[sport]
+
+    # If the search sheet is already the current page, it is the intended
+    # destination: keep it open, switch its sport category, then let the
+    # caller fill and submit the search field.
+    if _search_overlay_open(driver):
+        print("当前已处于赛事搜索页面：不点击「取消」，直接选择赛事分类。")
+        ensure_selected(driver, sport_label, wait)
+        print(f"已在搜索页面确认「{sport_label}」分类选中。")
+        return
+
+    # Otherwise recover to the home page if necessary, then follow the normal
+    # configured route 体育 -> EB -> requested sport.
     recover_navigation_page(driver, "体育", wait)
     ensure_selected(driver, "体育", wait)
     ensure_selected(driver, "EB", wait)
-    sport_label = {"football": "足球", "basketball": "篮球"}[sport]
     ensure_selected(driver, sport_label, wait)
 
 
