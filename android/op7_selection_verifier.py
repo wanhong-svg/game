@@ -39,7 +39,7 @@ class SlipSnapshot:
     score: str
 
 
-def read_selection_slip(source: str) -> SlipSnapshot:
+def read_selection_slip(source: str, expected_league: str = "") -> SlipSnapshot:
     """Extract visible accessibility/text fields from the opened slip panel."""
     root = ET.fromstring(source)
     values = []
@@ -49,7 +49,8 @@ def read_selection_slip(source: str) -> SlipSnapshot:
             values.append(text)
     joined = "\n".join(values)
     market = next((x for x in values if x in {"全场独赢", "全场让分", "全场让球", "全场大小"}), "")
-    league = next((x for x in values if x in {"NBA", "WNBA"}), "")
+    league = (next((x for x in values if _norm(x) == _norm(expected_league)), "")
+              if expected_league else next((x for x in values if x in {"NBA", "WNBA"}), ""))
     odds_candidates = []
     # In the observed OP7 slip, the price is the numeric node immediately
     # following the standalone "@" accessibility node (or "@0.88" itself).
@@ -118,6 +119,6 @@ def verify_selection(expected: ExpectedSelection, actual: SlipSnapshot) -> None:
 
 def verify_current_slip(driver, expected: ExpectedSelection) -> SlipSnapshot:
     """Read and verify the current slip; never interact with stake/submit controls."""
-    actual = read_selection_slip(driver.page_source)
+    actual = read_selection_slip(driver.page_source, expected_league=expected.league)
     verify_selection(expected, actual)
     return actual
