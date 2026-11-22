@@ -57,8 +57,9 @@ def main() -> int:
     try:
         driver = create_driver(args.server, args.udid, args.package, no_reset=True)
         print(f"Connected: package={driver.current_package}, activity={driver.current_activity}")
-        print("请确认模拟器当前显示 OP7 赛事列表，并且列表已滚动到顶部。")
-        print("只执行列表区域下拉刷新手势；不会点击盘口、投注或账户控件。")
+        print("请在模拟器中手动进入 OP7 赛事列表，并将列表滚动到顶部。")
+        print("准备好后回到终端按 Enter；只执行列表区域下拉刷新手势，不点击盘口、投注或账户控件。")
+        input()
         completed = 0
         while args.count == 0 or completed < args.count:
             pull_to_refresh(driver, args.top_ratio, args.height_ratio,
