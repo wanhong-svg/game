@@ -36,9 +36,8 @@ def _score_pair(text: str) -> tuple[Optional[int], Optional[int]]:
 
 
 def parse_detail_event(source: str) -> EventSnapshot:
-    """Parse the event header and league label from the OP7 detail page."""
+    """Parse the event header even when XML normalizes attribute newlines to spaces."""
     root = ET.fromstring(source)
-    # The league label is a separate accessibility node on the detail screen.
     league_candidates = []
     for node in root.iter():
         label = (node.attrib.get("content-desc") or node.attrib.get("text") or "").strip()
@@ -51,68 +50,63 @@ def parse_detail_event(source: str) -> EventSnapshot:
         desc = node.attrib.get("content-desc", "").strip()
         if not desc:
             continue
-        lines = [x.strip() for x in desc.splitlines() if x.strip()]
-        if len(lines) >= 4 and "VS" not in lines[0].upper():
-            # Header commonly exposes: home, period, clock, score, away.
-            score_index = next((i for i, x in enumerate(lines) if _score_pair(x) != (None, None)), None)
-            if score_index is not None and score_index >= 1 and score_index + 1 < len(lines):
-                progress_text = " ".join(lines[1:score_index])
-                period_match = re.search(r"(第[一二三四五六七八九十\d]+节|第[一二三四五六七八九十\d]+局|上半场|下半场|加时)", progress_text)
-                clock_match = re.search(r"(?<!\d)\d{1,2}:\d{2}(?!\d)", progress_text)
-                hs, aws = _score_pair(lines[score_index])
-                candidates.append(EventSnapshot(
-                    league=league, home=lines[0], away=lines[score_index + 1],
-                    home_score=hs, away_score=aws,
-                    period=period_match.group(1) if period_match else "",
-                    clock=clock_match.group(0) if clock_match else "",
-                    event_label=desc,
-                ))
+        flat = re.sub(r"\s+", " ", desc)
+        score_match = re.search(r"(?<!\d)(\d{1,3})\s*[-–—]\s*(\d{1,3})(?!\d)", flat)
+        if not score_match:
+            continue
+        prefix = flat[:score_match.start()].strip()
+        suffix = flat[score_match.end():].strip()
+        # The detail header order is home, period, clock, score, away.
+        progress = re.search(r"(第[一二三四五六七八九十\d]+节|第[一二三四五六七八九十\d]+局|上半场|下半场|加时)\s+(\d{1,2}:\d{2})$", prefix)
+        if not progress or not prefix[:progress.start()].strip() or not suffix:
+            continue
+        candidates.append(EventSnapshot(
+            league=league,
+            home=prefix[:progress.start()].strip(),
+            away=suffix,
+            home_score=int(score_match.group(1)),
+            away_score=int(score_match.group(2)),
+            period=progress.group(1),
+            clock=progress.group(2),
+            event_label=desc,
+        ))
     if not candidates:
         raise ValueError("未能从当前 UI 控件树唯一读取赛事详情；请确认处于赛事详情页")
-    # The largest descriptive header is normally the event header. Ambiguity is rejected.
-    unique = {(x.home, x.away, x.home_score, x.away_score, x.period) for x in candidates}
+    unique = {(x.home, x.away, x.home_score, x.away_score, x.period, x.clock) for x in candidates}
     if len(unique) != 1:
         raise ValueError("赛事详情控件树存在多个候选赛事头部，拒绝猜测")
     return candidates[0]
 
 
 def parse_search_results(source: str) -> list[EventSnapshot]:
-    """Parse search result rows whose accessibility descriptions contain league + teams."""
+    """Parse search rows whose XML attribute whitespace may be normalized."""
     root = ET.fromstring(source)
     results: list[EventSnapshot] = []
     seen = set()
     for node in root.iter():
         desc = node.attrib.get("content-desc", "").strip()
-        if not desc or "VS" not in desc.upper():
+        if not desc:
             continue
-        lines = [x.strip() for x in desc.splitlines() if x.strip()]
-        if len(lines) < 2:
+        flat = re.sub(r"\s+", " ", desc)
+        matchup = re.search(r"(.+?)\s+VS\s+(.+)$", flat, re.I)
+        if not matchup:
             continue
-        matchup_line = next((x for x in lines if re.search(r"\s+VS\s+", x, re.I)), "")
-        if not matchup_line:
-            continue
-        teams = re.split(r"\s+VS\s+", matchup_line, maxsplit=1, flags=re.I)
-        if len(teams) != 2:
-            continue
-        league = lines[0]
-        period, clock = "", ""
-        for line in lines[1:]:
-            pm = re.search(r"(第[一二三四五六七八九十\d]+节|第[一二三四五六七八九十\d]+局|上半场|下半场|加时)", line)
-            cm = re.search(r"\b\d{1,2}:\d{2}\b", line)
-            if pm:
-                period = pm.group(1)
-            if cm:
-                clock = cm.group(0)
-        # Search rows may contain kickoff dates such as 11-22; scores are
-        # authoritative only on the live event detail header.
-        event = EventSnapshot(league, teams[0].strip(), teams[1].strip(),
+        prefix = flat[:matchup.start()].strip()
+        # The competition is the first token/group; following text is progress/date.
+        league = prefix.split(" ", 1)[0].strip()
+        progress_match = re.search(
+            r"(第[一二三四五六七八九十\d]+节|第[一二三四五六七八九十\d]+局|上半场|下半场|加时)\s+(\d{1,2}:\d{2})",
+            prefix,
+        )
+        period = progress_match.group(1) if progress_match else ""
+        clock = progress_match.group(2) if progress_match else ""
+        event = EventSnapshot(league, matchup.group(1).strip(), matchup.group(2).strip(),
                               None, None, period, clock, desc)
         key = (norm(league), norm(event.home), norm(event.away), period, clock)
         if key not in seen:
             results.append(event)
             seen.add(key)
     return results
-
 
 def _clock_seconds(value: str) -> Optional[int]:
     match = re.fullmatch(r"(\d{1,2}):(\d{2})", value.strip())
