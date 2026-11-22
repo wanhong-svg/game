@@ -416,29 +416,70 @@ def main() -> int:
                 field = visible_fields[0]
 
         query = args.event.strip()
-        field.click()
-        try:
-            field.clear()
-        except Exception:
-            pass
 
-        # Avoid send_keys(query) for CJK text: the active IME can leave a
-        # composing/candidate glyph in the field. Paste the exact Unicode text
-        # through Android's clipboard instead.
-        if not hasattr(driver, "set_clipboard_text"):
-            raise RuntimeError(
-                "当前 Appium Python Client 不支持 set_clipboard_text；"
-                "请升级 Appium-Python-Client 后重试，未使用不可靠的中文逐字输入。"
-            )
-        driver.set_clipboard_text(query)
+        def read_search_text() -> str:
+            return field.get_attribute("text") or ""
+
+        # First inspect and clear any previous query. Do not continue until the
+        # field is confirmed empty, otherwise old text can be concatenated.
         field.click()
-        driver.press_keycode(279)  # Android KEYCODE_PASTE
-        time.sleep(0.3)
-        actual_value = field.get_attribute("text") or ""
+        existing_value = read_search_text()
+        if existing_value:
+            print(f"搜索框已有内容 {existing_value!r}，先执行清空。")
+            try:
+                field.clear()
+            except Exception:
+                pass
+            time.sleep(0.2)
+            if read_search_text():
+                # Some custom EditText implementations ignore clear(); select
+                # all text and delete it through the focused native field.
+                field.click()
+                field.send_keys(Keys.CONTROL, "a")
+                field.send_keys(Keys.BACKSPACE)
+                time.sleep(0.2)
+            if read_search_text():
+                raise RuntimeError(
+                    f"搜索框清空失败，当前内容仍为 {read_search_text()!r}；停止输入。"
+                )
+            print("搜索框已确认清空。")
+        else:
+            print("搜索框当前为空，无需清空。")
+
+        # Prefer Android clipboard paste for CJK input. If the clipboard paste
+        # does not populate the field, retry with direct input only after a
+        # confirmed clear; exact-text validation prevents submitting IME noise.
+        pasted = False
+        if hasattr(driver, "set_clipboard_text"):
+            driver.set_clipboard_text(query)
+            field.click()
+            driver.press_keycode(279)  # Android KEYCODE_PASTE
+            time.sleep(0.4)
+            pasted = read_search_text() == query
+
+        if not pasted:
+            current_value = read_search_text()
+            if current_value:
+                field.click()
+                field.clear()
+                time.sleep(0.2)
+                if read_search_text():
+                    field.send_keys(Keys.CONTROL, "a")
+                    field.send_keys(Keys.BACKSPACE)
+                    time.sleep(0.2)
+            if read_search_text():
+                raise RuntimeError(
+                    f"输入重试前无法清空搜索框：{read_search_text()!r}；停止提交。"
+                )
+            field.click()
+            field.send_keys(query)
+            time.sleep(0.3)
+
+        actual_value = read_search_text()
         if actual_value != query:
             raise RuntimeError(
                 f"搜索框输入校验失败：期望 {query!r}，实际 {actual_value!r}；"
-                "剪贴板粘贴后内容不一致，已停止提交。"
+                "清空后粘贴/输入仍不一致，已停止提交。"
             )
         print(f"搜索框内容校验通过：{actual_value!r}")
         if args.submit == "enter":
