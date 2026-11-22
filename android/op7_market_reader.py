@@ -124,7 +124,7 @@ def find_unique_option(options: list[MarketOption], *, market_type: str,
 
 
 def open_selection_slip(driver, option: MarketOption) -> None:
-    """Open the selected option's slip by its exact accessibility label only.
+    """Open the selected option's slip by its exact visible text only.
 
     This opens the review panel, not the final wager action. This function never
     fills an amount and never presses a submit/place-bet control.
@@ -132,7 +132,7 @@ def open_selection_slip(driver, option: MarketOption) -> None:
     from appium.webdriver.common.appiumby import AppiumBy
     matches = driver.find_elements(
         AppiumBy.XPATH,
-        f"//*[@content-desc={_xpath_literal(option.accessibility_label)}]"
+        f"//*[@text={_xpath_literal(option.accessibility_label)}]"
     )
     if len(matches) != 1:
         raise ValueError(f"盘口控件匹配到 {len(matches)} 个元素，拒绝点击")
