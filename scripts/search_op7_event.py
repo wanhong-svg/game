@@ -7,10 +7,16 @@ orders, wallet, account, or funds controls.
 from __future__ import annotations
 
 import argparse
+import io
 import sys
 import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
+
+try:
+    from PIL import Image
+except ImportError:
+    Image = None
 
 from appium.webdriver.common.appiumby import AppiumBy
 from selenium.webdriver.common.keys import Keys
@@ -120,7 +126,7 @@ def _control_by_label(driver, label: str):
 
 
 def _selected_state(element) -> bool | None:
-    """Read explicit accessibility selection state; never infer from color."""
+    """Read explicit accessibility selection state when the app exposes it."""
     selected = element.get_attribute("selected")
     checked = element.get_attribute("checked")
     values = [v.strip().lower() for v in (selected, checked) if v is not None and v != ""]
@@ -131,28 +137,57 @@ def _selected_state(element) -> bool | None:
     return None
 
 
-def ensure_selected(driver, label: str, wait: float = 1.5) -> None:
-    """Select a navigation tab, wait for rendering, then verify selected state.
+def _is_eb_visually_selected(element) -> bool:
+    """Recognize EB's blue selected pill from the user-provided OP/EB references.
 
-    Existence after a tap is not proof of selection. Fail closed when the app
-    does not expose selected/checked state; visual verification can be added
-    once a reference screenshot for the active/inactive appearance is supplied.
+    The clickable EB element is captured independently, so sampling is relative
+    to its bounds and does not depend on device screenshot resolution or offsets.
     """
+    if Image is None:
+        raise RuntimeError(
+            "EB 视觉确认需要 Pillow；请先执行：python3 -m pip install Pillow"
+        )
+    screenshot = Image.open(io.BytesIO(element.screenshot_as_png)).convert("RGB")
+    width, height = screenshot.size
+    if width < 8 or height < 8:
+        raise RuntimeError(f"EB 控件截图尺寸异常：{width}x{height}")
+    # Sample an interior patch near the left edge, away from the centered EB text
+    # and rounded corners. Reference selected blue is RGB (27, 129, 255).
+    x0, x1 = int(width * 0.12), int(width * 0.28)
+    y0, y1 = int(height * 0.35), int(height * 0.65)
+    pixels = list(screenshot.crop((x0, y0, x1, y1)).getdata())
+    blue = sum(1 for r, g, b in pixels if b >= 190 and g >= 75 and r <= 75 and b - r >= 120)
+    ratio = blue / max(len(pixels), 1)
+    print(f"EB 选中视觉检测：蓝色像素占比 {ratio:.0%}。")
+    return ratio >= 0.60
+
+
+def _is_selected(driver, label: str, element) -> bool | None:
+    # EB has no selected/checked accessibility flag. Use the supplied visual
+    # reference pair: selected EB = blue pill with white text; inactive EB = white
+    # pill with dark text.
+    if label == "EB":
+        return _is_eb_visually_selected(element)
+    return _selected_state(element)
+
+
+def ensure_selected(driver, label: str, wait: float = 1.5) -> None:
+    """Select a navigation tab, wait for rendering, then verify its active state."""
     element = _control_by_label(driver, label)
-    state = _selected_state(element)
+    state = _is_selected(driver, label, element)
     if state is True:
-        print(f"「{label}」已明确处于选中状态。")
+        print(f"「{label}」已确认处于选中状态。")
         return
     if state is False:
         print(f"「{label}」明确未选中，执行切换。")
     else:
-        print(f"「{label}」未提供 selected/checked 状态，点击后必须重新验证。")
+        print(f"「{label}」未提供可确认的选中状态，点击后必须重新验证。")
     element.click()
     time.sleep(wait)
     refreshed = _control_by_label(driver, label)
-    verified = _selected_state(refreshed)
+    verified = _is_selected(driver, label, refreshed)
     if verified is not True:
-        reason = "仍明确未选中" if verified is False else "控件树未暴露 selected/checked，无法确认"
+        reason = "仍明确未选中" if verified is False else "无法确认选中状态"
         raise RuntimeError(
             f"点击「{label}」并等待 {wait:.1f}s 后，{reason}；"
             "停止后续操作，不能仅凭控件存在判定切换成功。"
