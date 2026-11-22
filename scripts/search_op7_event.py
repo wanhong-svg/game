@@ -421,24 +421,34 @@ def main() -> int:
             field.clear()
         except Exception:
             pass
-        # Selenium/Appium WebElement does not implement set_value().
-        # Use the supported send_keys API, then verify the exact text before submit.
-        field.send_keys(query)
+
+        # Avoid send_keys(query) for CJK text: the active IME can leave a
+        # composing/candidate glyph in the field. Paste the exact Unicode text
+        # through Android's clipboard instead.
+        if not hasattr(driver, "set_clipboard_text"):
+            raise RuntimeError(
+                "当前 Appium Python Client 不支持 set_clipboard_text；"
+                "请升级 Appium-Python-Client 后重试，未使用不可靠的中文逐字输入。"
+            )
+        driver.set_clipboard_text(query)
+        field.click()
+        driver.press_keycode(279)  # Android KEYCODE_PASTE
+        time.sleep(0.3)
         actual_value = field.get_attribute("text") or ""
         if actual_value != query:
             raise RuntimeError(
                 f"搜索框输入校验失败：期望 {query!r}，实际 {actual_value!r}；"
-                "已停止提交，避免使用含异常字符的搜索词。"
+                "剪贴板粘贴后内容不一致，已停止提交。"
             )
         print(f"搜索框内容校验通过：{actual_value!r}")
         if args.submit == "enter":
-            # The search sheet exposes two controls labelled 搜索 (tab title and
-            # submit action). Avoid ambiguous XPath selection and submit from the
-            # focused search field using the keyboard Enter action.
-            field.send_keys(Keys.ENTER)
-            print("已在搜索输入框发送 Enter，执行搜索。")
+            # Send the Android hardware/IME Enter keycode, not a literal
+            # WebElement key string, so the app receives a native key event.
+            driver.press_keycode(66)  # Android KEYCODE_ENTER
+            time.sleep(0.3)
+            print("已发送 Android KEYCODE_ENTER。")
         else:
-            print("Query left in the search field; not submitted.")
+            print("Query left in the field; not submitted.")
 
         # Wait for either parsed event rows or the explicit empty-result state.
         deadline = time.monotonic() + args.wait
