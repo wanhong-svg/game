@@ -22,10 +22,9 @@ EXPECTED_SETTLEMENT = "FULL_GAME_INCLUDING_OT"
 DEFAULT_CONFIG = {
     "event_filter": {
         "soccer_whitelist": ["EPL", "LaLiga", "SerieA", "Bundesliga", "Ligue1", "UCL"],
-        "basketball_whitelist": ["NBA", "KBL"],
+        "basketball_whitelist": ["FRANCE_WOMEN_LFB"],
         "league_aliases": {
-            "NBA": ["NBA", "National Basketball Association"],
-            "KBL": ["KBL", "Korean Basketball League", "Korea Basketball League", "韩国篮球联赛", "韩国职业篮球联赛"]
+            "FRANCE_WOMEN_LFB": ["LFB", "Ligue Féminine de Basket", "Ligue Feminine de Basket", "La Boulangère Wonderligue", "La Boulangere Wonderligue", "Wonderligue", "Ligue Féminine de Basketball", "France Women's Basketball League", "法国女子篮球联赛"]
         }
     },
     "platforms": {
@@ -74,7 +73,7 @@ def norm(value):
 def load_config(path):
     cfg = json.loads(Path(path).read_text(encoding="utf-8")) if path else json.loads(json.dumps(DEFAULT_CONFIG))
     cfg.setdefault("event_filter", {})
-    cfg["event_filter"].setdefault("basketball_whitelist", ["NBA", "KBL"])
+    cfg["event_filter"].setdefault("basketball_whitelist", ["FRANCE_WOMEN_LFB"])
     cfg.setdefault("matching", {})
     cfg["matching"].setdefault("basketball_overtime_enabled", True)
     cfg.setdefault("settlement", {}).setdefault("basketball", {})
@@ -104,7 +103,7 @@ def classify_league(event, cfg):
 def is_basketball(event):
     sport = norm(event.get("sport") or event.get("sport_type"))
     league = norm(event.get("league"))
-    return any(x in sport or x in league for x in ("basketball", "篮球", "nba", "kbl", "korea"))
+    return any(x in sport or x in league for x in ("basketball", "篮球", "nba", "kbl", "korea", "wonderligue", "lfb"))
 
 
 def classify_market(row, venue, cfg):
@@ -218,7 +217,7 @@ def normalize_rows(payload, cfg):
         p_cfg = cfg.get("platforms", {}).get(platform, {})
 
         if league is None:
-            status, reason = "EVENT_OUT_OF_SCOPE", "赛事不在 NBA/KBL 白名单或联赛别名未配置"
+            status, reason = "EVENT_OUT_OF_SCOPE", "赛事不在法国女子篮球联赛（LFB / Wonderligue）白名单或联赛别名未配置"
         elif market_type not in ALLOWED_MARKETS:
             status, reason = "UNSUPPORTED_MARKET", "仅允许全场让分、全场大小分、全场独赢；未知或未配置玩法不猜测"
         else:
