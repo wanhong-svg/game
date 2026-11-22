@@ -35,8 +35,16 @@ def _score_pair(text: str) -> tuple[Optional[int], Optional[int]]:
 
 
 def parse_detail_event(source: str) -> EventSnapshot:
-    """Parse the event header descriptor seen on OP7 detail page."""
+    """Parse the event header and league label from the OP7 detail page."""
     root = ET.fromstring(source)
+    # The league label is a separate accessibility node on the detail screen.
+    league_candidates = []
+    for node in root.iter():
+        label = (node.attrib.get("content-desc") or node.attrib.get("text") or "").strip()
+        if re.fullmatch(r"[A-Z][A-Z0-9 ._-]{1,15}", label):
+            league_candidates.append(label)
+    league_values = list(dict.fromkeys(league_candidates))
+    league = league_values[0] if len(league_values) == 1 else ""
     candidates = []
     for node in root.iter():
         desc = node.attrib.get("content-desc", "").strip()
@@ -49,12 +57,12 @@ def parse_detail_event(source: str) -> EventSnapshot:
             if score_index is not None and score_index >= 1 and score_index + 1 < len(lines):
                 progress_text = " ".join(lines[1:score_index])
                 period_match = re.search(r"(第[一二三四五六七八九十\d]+节|第[一二三四五六七八九十\d]+局|上半场|下半场|加时)", progress_text)
-                clock_match = re.search(r"\b\d{1,2}:\d{2}\b", progress_text)
+                clock_match = re.search(r"(?<!\d)\d{1,2}:\d{2}(?!\d)", progress_text)
                 hs, aws = _score_pair(lines[score_index])
                 candidates.append(EventSnapshot(
-                    league="", home=lines[0], away=lines[score_index + 1],
+                    league=league, home=lines[0], away=lines[score_index + 1],
                     home_score=hs, away_score=aws,
-                    period=period_match.group(1) if period_match else period_clock,
+                    period=period_match.group(1) if period_match else "",
                     clock=clock_match.group(0) if clock_match else "",
                     event_label=desc,
                 ))
@@ -103,6 +111,16 @@ def parse_search_results(source: str) -> list[EventSnapshot]:
     return results
 
 
+def _clock_seconds(value: str) -> Optional[int]:
+    match = re.fullmatch(r"(\d{1,2}):(\d{2})", value.strip())
+    if not match:
+        return None
+    minutes, seconds = int(match.group(1)), int(match.group(2))
+    if seconds > 59:
+        return None
+    return minutes * 60 + seconds
+
+
 def same_live_event(a: EventSnapshot, b: EventSnapshot) -> bool:
     """Require same competition, same two teams, same period and oriented score."""
     if not all((a.league, b.league, a.home, a.away, b.home, b.away)):
@@ -114,6 +132,14 @@ def same_live_event(a: EventSnapshot, b: EventSnapshot) -> bool:
     if not (same_order or reverse_order):
         return False
     if not a.period or not b.period or norm(a.period) != norm(b.period):
+        return False
+    # Both clocks must be visible. Small refresh/network delays are expected,
+    # but a materially different clock means the match is not confirmed.
+    if not a.clock or not b.clock:
+        return False
+    clock_a = _clock_seconds(a.clock)
+    clock_b = _clock_seconds(b.clock)
+    if clock_a is None or clock_b is None or abs(clock_a - clock_b) > 120:
         return False
     if None in (a.home_score, a.away_score, b.home_score, b.away_score):
         return False
