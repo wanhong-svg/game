@@ -123,8 +123,9 @@ def _clock_seconds(value: str) -> Optional[int]:
     return minutes * 60 + seconds
 
 
-def same_live_event(a: EventSnapshot, b: EventSnapshot) -> bool:
-    """Require same competition, same two teams, same period and oriented score."""
+def same_live_event(a: EventSnapshot, b: EventSnapshot,
+                    clock_tolerance_seconds: int = 120) -> bool:
+    """Require same competition, teams, period, near-synchronous clocks and score."""
     if not all((a.league, b.league, a.home, a.away, b.home, b.away)):
         return False
     if norm(a.league) != norm(b.league):
@@ -141,7 +142,8 @@ def same_live_event(a: EventSnapshot, b: EventSnapshot) -> bool:
         return False
     clock_a = _clock_seconds(a.clock)
     clock_b = _clock_seconds(b.clock)
-    if clock_a is None or clock_b is None or abs(clock_a - clock_b) > 120:
+    if (clock_tolerance_seconds < 0 or clock_a is None or clock_b is None
+            or abs(clock_a - clock_b) > clock_tolerance_seconds):
         return False
     if None in (a.home_score, a.away_score, b.home_score, b.away_score):
         return False
