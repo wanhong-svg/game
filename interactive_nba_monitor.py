@@ -185,8 +185,10 @@ def confirm_first_bet_initialization() -> dict:
     api_origin = captured.get("request_origin") or (f"https://{captured.get('host')}" if captured.get("host") else None)
     page_origin = captured.get("page_origin")
     if api_origin:
-        cfg["apis"]["eb"]["base_url"] = api_origin
-        cfg["apis"]["eb"]["nba_read_base_url"] = api_origin
+        # Keep the bet API origin separate from the read-only EB market API.
+        # These services may use different hosts in the same environment.
+        cfg["apis"]["eb"]["bet_api_base_url"] = api_origin
+        cfg["apis"]["eb"]["bet_path"] = EB_BET_PATH
         api_host = urlsplit(api_origin).hostname
         cfg["apis"]["eb"]["hosts"] = list(dict.fromkeys((cfg["apis"]["eb"].get("hosts") or []) + [api_host]))
     cfg.setdefault("runtime_discovery", {})
