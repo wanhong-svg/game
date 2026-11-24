@@ -59,8 +59,8 @@ def identify_venue(url):
     if h in EB_HOSTS and (path in ENDPOINTS['apis']['eb']['read_paths'] or path in ENDPOINTS['apis']['eb']['bet_paths']): return 'EB'
     if h in COMMON_HOSTS:
         gt=(q.get('gameType') or [''])[0].upper()
-        if gt=='FB': return 'FB'
-        if gt=='OB': return 'EB'
+        mapped=ENDPOINTS['apis']['common'].get('game_type_map',{}).get(gt)
+        if mapped in ('FB','EB'): return mapped
     if h in PB_HOSTS and path.startswith('/sports-service/sv/compact/'): return 'PINGBO'
     return None
 
