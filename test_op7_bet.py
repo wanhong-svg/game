@@ -2,7 +2,7 @@ import os
 import unittest
 from unittest.mock import patch
 from op7_test_bet import (build_latest_market_request, build_limit_request, build_bet_payload,
-    validate_test_target, select_eb_full_game_total, validate_cross_odds_snapshot, parse_bet_result)
+    validate_test_target, select_eb_full_game_total, validate_cross_odds_snapshot,\n    refresh_and_validate_cross_odds, parse_bet_result)
 
 SELECTION = {
     "event":{"mid":"m1","tid":"262","csid":"1","csna":"足球","tn":"欧洲联赛"},
@@ -80,6 +80,16 @@ class BetPayloadTests(unittest.TestCase):
                 "eb_under":"2.05","eb_over":"1.8","pingbo_over":"2.05","pingbo_under":"1.8",
                 "eb_under_line":"213.5","pingbo_over_line":"214.0"
             })
+
+
+    def test_two_book_refresh_must_finish_within_five_seconds(self):
+        snapshot = {
+            "eb_under":"2.05","eb_over":"1.80","pingbo_over":"2.05","pingbo_under":"1.80",
+            "eb_under_line":"214.5","pingbo_over_line":"214.0"
+        }
+        with patch("op7_test_bet.time.monotonic", side_effect=[0.0, 5.1]):
+            with self.assertRaisesRegex(RuntimeError, "5.1s"):
+                refresh_and_validate_cross_odds(lambda: snapshot, max_seconds=5.0)
 
     def test_parse_bet_result_converts_fen_to_yuan_and_keeps_order_no(self):
         parsed = parse_bet_result({"code":"0000000","data":{
