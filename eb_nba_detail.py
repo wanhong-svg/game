@@ -269,6 +269,76 @@ class EBClient:
         }
 
 
+def decode_har_entry(entry: dict[str, Any]) -> Any:
+    """Decode a HAR response body without importing any request credentials."""
+    content = (entry.get("response") or {}).get("content") or {}
+    raw = content.get("text")
+    if not raw:
+        return None
+    if content.get("encoding") == "base64":
+        raw = base64.b64decode(raw).decode("utf-8")
+    return unwrap_response(json.loads(raw))
+
+
+def analyze_har(path: str | Path) -> dict[str, Any]:
+    """Offline replay of the captured list -> detail -> odds request chain."""
+    har = json.loads(Path(path).read_text(encoding="utf-8"))
+    entries = har.get("log", {}).get("entries", [])
+    list_payload = None
+    odds_by_mid: dict[str, Any] = {}
+    detail_mids: set[str] = set()
+    category_mids: set[str] = set()
+    for entry in entries:
+        request = entry.get("request") or {}
+        url = request.get("url", "")
+        parsed = urllib.parse.urlsplit(url)
+        query = urllib.parse.parse_qs(parsed.query)
+        if parsed.path == LIST_PATH and request.get("method") == "POST":
+            candidate = decode_har_entry(entry)
+            if isinstance(candidate, dict) and isinstance(candidate.get("data"), list):
+                list_payload = candidate
+        elif parsed.path == DETAIL_PATH and request.get("method") == "GET":
+            mid = (query.get("mid") or [""])[0]
+            if mid:
+                detail_mids.add(mid)
+        elif parsed.path == CATEGORY_PATH and request.get("method") == "GET":
+            mid = (query.get("mid") or [""])[0]
+            if mid:
+                category_mids.add(mid)
+        elif parsed.path == ODDS_PATH and request.get("method") == "GET":
+            mid = (query.get("mid") or [""])[0]
+            if mid:
+                candidate = decode_har_entry(entry)
+                if isinstance(candidate, list):
+                    odds_by_mid[mid] = candidate
+    if list_payload is None:
+        raise EBApiError(f"HAR 中未找到可解码的 {LIST_PATH} POST 响应")
+    events = [event for event in list_payload.get("data", [])
+              if isinstance(event, dict) and is_regular_nba(event)]
+    rows: list[dict[str, Any]] = []
+    missing: list[str] = []
+    for event in events:
+        mid = event_identity(event)["mid"]
+        odds = odds_by_mid.get(mid)
+        if odds is None:
+            missing.append(mid)
+            continue
+        rows.extend(extract_extra_under_markets(event, odds))
+    return {
+        "source": "HAR_OFFLINE_REPLAY",
+        "events_in_captured_page": len(list_payload.get("data", [])),
+        "regular_nba_events": [event_identity(event) for event in events],
+        "detail_requests_seen": sorted(detail_mids),
+        "category_requests_seen": sorted(category_mids),
+        "odds_responses_seen": sorted(odds_by_mid),
+        "extra_under_count": len(rows),
+        "extra_under_markets": rows,
+        "nba_events_without_odds_response": missing,
+        "pagination_pages_reported": list_payload.get("pages"),
+        "pagination_note": "离线 HAR 只重放已抓取页面；实时客户端会按 pages 自动翻页。",
+    }
+
+
 def _headers_from_env() -> dict[str, str]:
     raw = os.environ.get("EB_READONLY_HEADERS_JSON", "")
     if not raw:
@@ -282,15 +352,19 @@ def _headers_from_env() -> dict[str, str]:
 def main() -> None:
     parser = argparse.ArgumentParser(description="EB NBA additional full-game Under market discovery (read-only)")
     parser.add_argument("--out", default="eb_nba_extra_under.json")
+    parser.add_argument("--har", help="仅离线解析 HAR，不发送网络请求")
     parser.add_argument("--page-size", type=int, default=50)
     parser.add_argument("--max-pages", type=int)
     parser.add_argument("--max-events", type=int)
     parser.add_argument("--timeout", type=int, default=15)
     args = parser.parse_args()
-    client = EBClient(headers=_headers_from_env(), timeout=args.timeout)
-    result = client.discover_extra_under(page_size=args.page_size,
-                                         max_pages=args.max_pages,
-                                         max_events=args.max_events)
+    if args.har:
+        result = analyze_har(args.har)
+    else:
+        client = EBClient(headers=_headers_from_env(), timeout=args.timeout)
+        result = client.discover_extra_under(page_size=args.page_size,
+                                             max_pages=args.max_pages,
+                                             max_events=args.max_events)
     Path(args.out).write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps({k: v for k, v in result.items() if k != "extra_under_markets"},
                      ensure_ascii=False, indent=2))
