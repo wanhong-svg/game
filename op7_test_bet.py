@@ -300,7 +300,7 @@ def require_success(response, endpoint):
 
 
 def submit_test_bet(selection, stake, timeout=15, cross_odds_refresh=None):
-    base_url = validate_test_target(os.environ.get("OP7_TEST_BET_BASE_URL", ENDPOINTS["apis"]["eb"]["base_url"]))
+    base_url = validate_test_target(os.environ.get("OP7_TEST_BET_BASE_URL", ENDPOINTS["apis"]["eb"].get("bet_api_base_url") or ENDPOINTS["apis"]["eb"]["base_url"]))
     headers = _headers()
     latest_response = post_json(base_url, LATEST_PATH, build_latest_market_request(selection), headers, timeout)
     latest_rows = require_success(latest_response, LATEST_PATH)
@@ -399,7 +399,7 @@ def redact(value):
 def main():
     parser = argparse.ArgumentParser(description="Build or submit one local-test OP7/EB wager")
     parser.add_argument("--input", required=True, help="local JSON with event/market/group/option fields")
-    parser.add_argument("--stake", required=True, help="test stake amount")
+    parser.add_argument("--stake", default="11", help="test stake amount in yuan (default: 11)")
     parser.add_argument("--submit-test", action="store_true", help="send only after local-test guards pass")
     parser.add_argument("--timeout", type=int, default=15)
     args = parser.parse_args()
