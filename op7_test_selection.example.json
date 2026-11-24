@@ -1,0 +1,32 @@
+{
+  "event": {
+    "mid": "<match_mid>",
+    "tid": "<tournament_id>",
+    "csid": "<sport_id>",
+    "csna": "<sport_name>",
+    "tn": "<tournament_name>",
+    "tnjc": "<short_tournament_name>"
+  },
+  "market": {
+    "hpid": "<play_id>",
+    "hpn": "<play_name>"
+  },
+  "group": {
+    "hid": "<market_id>",
+    "hv": "<market_line>",
+    "hn": 1
+  },
+  "option": {
+    "oid": "<odds_id>",
+    "ot": "<odds_type>",
+    "ov": 0,
+    "otv": "<display_selection_name>",
+    "onb": "<fallback_selection_name>"
+  },
+  "match_type": 2,
+  "place_num": 1,
+  "market_type_finally": "EU",
+  "score_benchmark": "",
+  "cuid": "<local-session-cuid>",
+  "device_imei": "<local-session-device-identifier>"
+}
