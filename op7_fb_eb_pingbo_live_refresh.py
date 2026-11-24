@@ -139,7 +139,7 @@ def main():
  ap.add_argument('--out',default='live_snapshots'); ap.add_argument('--live',action='store_true')
  ap.add_argument('--fb-list-interval',type=int); ap.add_argument('--fb-odds-interval',type=int)
  ap.add_argument('--eb-list-interval',type=int); ap.add_argument('--eb-odds-interval',type=int)
- ap.add_argument('--pingbo-interval',type=int); ap.add_argument('--fb-max-events',type=int,default=8); ap.add_argument('--eb-max-events',type=int,default=10)
+ ap.add_argument('--pingbo-interval',type=int); ap.add_argument('--fb-max-events',type=int,default=8); ap.add_argument('--eb-max-events',type=int,default=50)
  ap.add_argument('--timeout',type=int,default=15); ap.add_argument('--max-runtime',type=int,default=0)
  a=ap.parse_args()
  if a.setup_session:
