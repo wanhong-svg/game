@@ -24,6 +24,9 @@ class FirstBetInitializationTests(unittest.TestCase):
         monitor.FIRST_BET_CAPTURE.update({
             "response_ok": True, "http_status": 200,
             "business_code": "0000000", "order_numbers": [],
+            "request_template": {"seriesOrders": []},
+            "request_origin": "https://api.sandbox.invalid",
+            "page_origin": "https://web.sandbox.invalid",
         })
         with self.assertRaisesRegex(RuntimeError, "orderNo"):
             monitor.confirm_first_bet_initialization()
@@ -33,6 +36,9 @@ class FirstBetInitializationTests(unittest.TestCase):
             "host": "eb-sandbox.example", "path": monitor.EB_BET_PATH,
             "response_ok": True, "http_status": 200,
             "business_code": "0000000", "order_numbers": ["TEST-ORDER-001"],
+            "request_template": {"seriesOrders": []},
+            "request_origin": "https://api.sandbox.invalid",
+            "page_origin": "https://web.sandbox.invalid",
         })
         audit = monitor.confirm_first_bet_initialization()
         saved = json.loads(self.audit_path.read_text(encoding="utf-8"))
