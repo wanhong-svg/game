@@ -52,7 +52,17 @@ NBA赛事详情：
 
 详情盘口只读取 `normal.periods["0"].overUnder`，即全场大小分，不把半场盘口混入全场盘口。结果写入 `pingbo_nba_live_details.json`，并在终端逐场显示大小分盘口和赔率。
 
-如果本机已启动 EB 只读刷新程序并生成 `live_snapshots/EB_events_latest.json` 与 `EB_markets_latest.json`，程序还会调用既有校验逻辑输出 EB Under 对 Pingbo Over 的盘口匹配、赔率、合并隐含概率和 Edge。
+如果本机已启动 EB 只读刷新程序并生成 `live_snapshots/EB_events_latest.json` 与 `EB_markets_latest.json`，程序会执行以下规则：
+
+1. 赛事必须是正规 NBA，双方球队按无序组合确认同一场比赛（主客顺序不作为盘口匹配条件），且 EB/Pingbo 开赛时间戳一致。
+2. 滚球赛事还必须双方都明确处于滚球，并提供一致的规范化节次与秒级比赛进度；进度字段缺失或不一致时拒绝匹配，不猜测不同平台的状态枚举。
+3. 盘口入口只读取 EB 全场小分，匹配同一场 Pingbo 全场大分，且仅当 `EB Under line >= Pingbo Over line` 时进入赔率计算。
+4. 赔率双向交叉计算：
+   - A：`1 / Pingbo Over + 1 / EB Under < 1.0052`
+   - B：`1 / Pingbo Under + 1 / EB Over < 1.0052`
+5. 仅 A 成立记录 EB 小分赔率；仅 B 成立记录 EB 大分赔率；两项同时成立标记异常；均不成立不生成候选。
+
+结果写入 `eb_pingbo_nba_validation.json`。注意：当前程序只有在数据源提供明确的滚球节次/时钟字段时才会接受滚球匹配；缺字段会保守拒绝。
 
 ## 安全边界
 
