@@ -204,7 +204,7 @@ def _write_order_audit(record):
         raise RuntimeError("bet order audit file has invalid structure")
     records.append(record)
     temp = ORDER_AUDIT_PATH.with_suffix(".json.tmp")
-    temp.write_text(json.dumps(current, ensure_ascii=False, indent=2) + "\\n", encoding="utf-8")
+    temp.write_text(json.dumps(current, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     temp.replace(ORDER_AUDIT_PATH)
 
 
