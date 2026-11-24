@@ -58,6 +58,56 @@ def load_snapshot(p):
     x=json.loads(p.read_text(encoding="utf-8"))
     if x.get("status") not in (None,"SUCCESS","PARTIAL"): raise RuntimeError(f"{p.name} 状态异常：{x.get('status')}")
     return x
+def is_over(s):
+    t=" ".join(str(s.get(k) or "") for k in ("selection","selection_code","side_code","source_code")).lower()
+    return bool(re.search(r"(^|[^a-z])(over|o)([^a-z]|$)|大分|大于|大",t))
+
+def normalize_start_time(value):
+    if value in (None, ""):
+        return None
+    try:
+        n=int(value)
+        # EB/Pingbo timestamps are expected as Unix seconds or milliseconds.
+        return n if abs(n)<100000000000 else n//1000
+    except (ValueError, TypeError):
+        return None
+
+def team_pair(ev):
+    a=team_key(ev.get("home_team_en") or ev.get("home_team") or ev.get("home"))
+    b=team_key(ev.get("away_team_en") or ev.get("away_team") or ev.get("away"))
+    return tuple(sorted((a,b))) if a and b else None
+
+def event_is_live(ev, venue):
+    explicit=ev.get("is_live")
+    if isinstance(explicit,bool):
+        return explicit
+    status=str(ev.get("raw_status") or ev.get("status") or "").strip().lower()
+    if status in {"live","inplay","in_play","进行中","滚球"}:
+        return True
+    if status in {"scheduled","not_started","未开赛","即将开始","prematch"}:
+        return False
+    phase=ev.get("phase_pe") if venue=="EB" else ev.get("phase_code")
+    if phase is None:
+        return None
+    # EB phase values below are taken from the existing event phase mapping.
+    if venue=="EB":
+        try: p=int(phase)
+        except (ValueError,TypeError): return None
+        if p==0: return False
+        if p in {6,31,302,7,41,42}: return True
+    return None
+
+def live_progress_signature(ev):
+    # Only compare explicitly normalized fields; do not equate vendor-specific
+    # numeric enums or guess the meaning of an undocumented clock field.
+    period=ev.get("period_label")
+    clock=ev.get("clock_seconds")
+    if period in (None,"") or clock in (None,""):
+        return None
+    try: clock=int(clock)
+    except (ValueError,TypeError): return None
+    return (str(period).strip().lower(), clock)
+
 def get_eb_under(snapshot_dir):
     es=load_snapshot(snapshot_dir/"EB_events_latest.json")
     ms=load_snapshot(snapshot_dir/"EB_markets_latest.json")
@@ -67,59 +117,126 @@ def get_eb_under(snapshot_dir):
         if not isinstance(m,dict) or str(m.get("play_id_hpid"))!="38": continue
         ev=evmap.get(str(m.get("event_id")),{})
         if not is_nba(ev): continue
-        for s in m.get("selections",[]):
-            if not is_under(s): continue
-            odds=dec(s.get("decimal_odds")); line=dec(m.get("line_hv"))
-            if odds is None or odds<=1 or line is None: continue
-            rows.append({"event_id":str(m.get("event_id")),"home_team":ev.get("home"),"away_team":ev.get("away"),
-             "league":ev.get("league") or ev.get("competition"),"period":"FULL_GAME","selection":"Under",
-             "points":str(line.normalize()),"odds_decimal":str(odds),"market_id":m.get("market_id"),
-             "group_id":m.get("group_id"),"selection_id":s.get("selection_id"),
-             "market_status":s.get("common_market_status",m.get("group_status_hs")),
-             "observed_at_utc":m.get("observed_at_utc")})
+        selections=m.get("selections",[])
+        under=next((s for s in selections if is_under(s)),None)
+        over=next((s for s in selections if is_over(s)),None)
+        if not under: continue
+        under_odds=dec(under.get("decimal_odds"))
+        over_odds=dec(over.get("decimal_odds")) if over else None
+        line=dec(m.get("line_hv"))
+        if under_odds is None or under_odds<=1 or line is None: continue
+        rows.append({
+            "event_id":str(m.get("event_id")),"home_team":ev.get("home"),"away_team":ev.get("away"),
+            "league":ev.get("league") or ev.get("competition"),"period":"FULL_GAME","selection":"Under",
+            "points":str(line.normalize()),"odds_decimal":str(under_odds),
+            "over_odds_decimal":str(over_odds) if over_odds is not None and over_odds>1 else None,
+            "market_id":m.get("market_id"),"group_id":m.get("group_id"),
+            "selection_id":under.get("selection_id"),
+            "market_status":under.get("common_market_status",m.get("group_status_hs")),
+            "start_time_ms":ev.get("start_time_ms"),"raw_status":ev.get("raw_status"),
+            "phase_pe":ev.get("phase_pe"),"period_label":ev.get("period_label"),
+            "clock_seconds":ev.get("clock_seconds"),"is_live":ev.get("is_live"),
+            "observed_at_utc":m.get("observed_at_utc")
+        })
     return rows,{"eb_events":len(evmap),"eb_market_groups":len(ms.get("data",[])),
                  "eb_event_status":es.get("status"),"eb_market_status":ms.get("status")}
-def run_validation(eb_rows,pb,min_edge):
+
+def run_validation(eb_rows,pb,min_edge=None):
+    threshold=Decimal("1.0052")
     pbmap={}
     for ev in pb.get("events",[]):
-        k=(team_key(ev.get("home_team_en") or ev.get("home_team")),team_key(ev.get("away_team_en") or ev.get("away_team")))
-        if all(k): pbmap[k]=ev
+        key=team_pair(ev)
+        if key:
+            pbmap.setdefault(key,[]).append(ev)
     out=[]
     for eb in eb_rows:
-        k=(team_key(eb.get("home_team")),team_key(eb.get("away_team")))
-        pe=pbmap.get(k)
-        base={**eb,"pingbo_selection":"Over"}
-        if not pe:
-            out.append({**base,"rule_status":"NO_EVENT_MATCH","rule_reason":"平博 NBA 列表未找到主客队顺序一致的同场赛事"}); continue
-        lines=[x for x in pe.get("full_game_totals",[]) if str(x.get("points"))==eb["points"] and not x.get("unavailable") and not x.get("offline")]
+        base={**eb,"match_entry":"EB_FULL_GAME_UNDER_ONLY"}
+        candidates=pbmap.get(team_pair(eb),[]) if team_pair(eb) else []
+        if not candidates:
+            out.append({**base,"rule_status":"NO_EVENT_MATCH","rule_reason":"平博未找到双方球队相同的 NBA 赛事"}); continue
+        eb_time=normalize_start_time(eb.get("start_time_ms"))
+        eligible=[]; rejected=[]
+        for pe in candidates:
+            pb_time=normalize_start_time(pe.get("start_time_ms"))
+            if eb_time is None or pb_time is None or eb_time!=pb_time:
+                rejected.append("开赛时间缺失或不一致")
+                continue
+            eb_live=event_is_live(eb,"EB")
+            pb_live=event_is_live(pe,"PINGBO")
+            if eb_live is None or pb_live is None or eb_live!=pb_live:
+                rejected.append("比赛状态无法确认一致")
+                continue
+            if eb_live:
+                eb_sig=live_progress_signature(eb)
+                pb_sig=live_progress_signature(pe)
+                if eb_sig is None or pb_sig is None or eb_sig!=pb_sig:
+                    rejected.append("滚球节次/比赛进度缺失或不一致")
+                    continue
+            eligible.append(pe)
+        if len(eligible)!=1:
+            status="EVENT_AMBIGUOUS" if len(eligible)>1 else "EVENT_STATE_MISMATCH"
+            reason="同一球队组合对应多场候选赛事" if len(eligible)>1 else (rejected[0] if rejected else "未能确认同一场比赛")
+            out.append({**base,"rule_status":status,"rule_reason":reason}); continue
+        pe=eligible[0]
+        lines=[]
+        for line in pe.get("full_game_totals",[]):
+            if line.get("period")!="FULL_GAME" or line.get("unavailable") or line.get("offline"):
+                continue
+            eb_line=dec(eb.get("points")); pb_line=dec(line.get("points"))
+            if eb_line is not None and pb_line is not None and eb_line>=pb_line:
+                lines.append(line)
         if not lines:
-            out.append({**base,"pingbo_event_id":pe.get("event_id"),"rule_status":"NO_REVERSE_LINE","rule_reason":"平博详情没有相同总分线的可用 Over 盘口"}); continue
+            out.append({**base,"pingbo_event_id":pe.get("event_id"),"rule_status":"NO_REVERSE_LINE",
+                        "rule_reason":"没有符合 EB 小分盘口分数 ≥ Pingbo 大分盘口分数的全场盘口"}); continue
         for line in lines:
-            po=dec(line.get("over_odds_decimal")); eo=dec(eb["odds_decimal"])
-            if po is None or po<=1:
-                out.append({**base,"pingbo_event_id":pe.get("event_id"),"rule_status":"ODDS_UNAVAILABLE","rule_reason":"平博 Over 赔率无效或未开放"}); continue
-            total=Decimal(1)/eo+Decimal(1)/po
-            edge=Decimal(1)-total
-            roi=edge/total*100 if total else Decimal(0)
-            passed=edge>min_edge
-            out.append({**base,"pingbo_event_id":pe.get("event_id"),"pingbo_home_team":pe.get("home_team"),
-             "pingbo_away_team":pe.get("away_team"),"pingbo_points":line.get("points"),"pingbo_line_id":line.get("line_id"),
-             "pingbo_odds_american":line.get("over_odds_american"),"pingbo_odds_decimal":str(po.quantize(Decimal(".001"))),
-             "calculation":{"eb_implied_probability":str((100/eo).quantize(Decimal(".001")))+"%",
-              "pingbo_implied_probability":str((100/po).quantize(Decimal(".001")))+"%",
-              "combined_implied_probability":str((total*100).quantize(Decimal(".001")))+"%",
-              "edge_percent":str((edge*100).quantize(Decimal(".001")))+"%",
-              "theoretical_roi_percent":str(roi.quantize(Decimal(".001")))+"%",
-              "formula":"1 - (1/EB_Under_decimal + 1/Pingbo_Over_decimal)"},
-             "rule_status":"RULE_PASS" if passed else "RULE_FAIL",
-             "rule_reason":"合并隐含概率低于100%且达到阈值" if passed else "合并隐含概率未低于100%或未达到阈值"})
+            eb_under=dec(eb.get("odds_decimal"))
+            eb_over=dec(eb.get("over_odds_decimal"))
+            pb_over=dec(line.get("over_odds_decimal"))
+            pb_under=dec(line.get("under_odds_decimal"))
+            valid=lambda x: x is not None and x>1
+            a_total=(Decimal(1)/pb_over+Decimal(1)/eb_under) if valid(pb_over) and valid(eb_under) else None
+            b_total=(Decimal(1)/pb_under+Decimal(1)/eb_over) if valid(pb_under) and valid(eb_over) else None
+            a_pass=a_total is not None and a_total<threshold
+            b_pass=b_total is not None and b_total<threshold
+            common={**base,"pingbo_event_id":pe.get("event_id"),
+                "pingbo_home_team":pe.get("home_team"),"pingbo_away_team":pe.get("away_team"),
+                "pingbo_points":line.get("points"),"pingbo_line_id":line.get("line_id"),
+                "line_condition":f"{eb.get('points')} >= {line.get('points')}",
+                "cross_checks":{
+                    "A_pingbo_over_plus_eb_under":{"pingbo_odds_decimal":str(pb_over) if pb_over is not None else None,
+                        "eb_odds_decimal":str(eb_under) if eb_under is not None else None,
+                        "reciprocal_sum":str(a_total) if a_total is not None else None,"threshold":"1.0052","passed":a_pass},
+                    "B_pingbo_under_plus_eb_over":{"pingbo_odds_decimal":str(pb_under) if pb_under is not None else None,
+                        "eb_odds_decimal":str(eb_over) if eb_over is not None else None,
+                        "reciprocal_sum":str(b_total) if b_total is not None else None,"threshold":"1.0052","passed":b_pass}
+                }}
+            if a_pass and b_pass:
+                out.append({**common,"rule_status":"ANOMALY_BOTH_DIRECTIONS",
+                    "rule_reason":"两个交叉方向同时低于 1.0052，标记异常，不生成候选赔率"})
+            elif not a_pass and not b_pass:
+                out.append({**common,"rule_status":"NO_MATCH",
+                    "rule_reason":"两个交叉方向均未满足严格小于 1.0052"})
+            elif a_pass:
+                out.append({**common,"candidate_side":"EB_UNDER","candidate_odds_decimal":str(eb_under),
+                    "pingbo_selection":"Over","pingbo_odds_decimal":str(pb_over),
+                    "reciprocal_sum":str(a_total),"rule_status":"CANDIDATE_A",
+                    "rule_reason":"仅 Pingbo 大分 + EB 小分方向满足阈值"})
+            else:
+                out.append({**common,"candidate_side":"EB_OVER","candidate_odds_decimal":str(eb_over),
+                    "pingbo_selection":"Under","pingbo_odds_decimal":str(pb_under),
+                    "reciprocal_sum":str(b_total),"rule_status":"CANDIDATE_B",
+                    "rule_reason":"仅 Pingbo 小分 + EB 大分方向满足阈值"})
     return {"generated_at_utc":datetime.now(timezone.utc).isoformat(),
-      "rule":{"name":"two_way_arbitrage_screen","min_edge_percent":str(min_edge*100),
-       "pass_condition":"1/EB_Under + 1/Pingbo_Over < 1 - min_edge"},
-      "summary":{"eb_under_rows":len(eb_rows),"rule_pass":sum(x["rule_status"]=="RULE_PASS" for x in out),
-       "rule_fail":sum(x["rule_status"]=="RULE_FAIL" for x in out),
-       "unmatched":sum(x["rule_status"] not in ("RULE_PASS","RULE_FAIL") for x in out)},
+      "rule":{"name":"EB_UNDER_ENTRY_TWO_WAY_CROSS_CHECK","entry_condition":"同一场正规 NBA；EB 全场小分盘口 >= Pingbo 全场大分盘口",
+       "cross_checks":["1/Pingbo_Over + 1/EB_Under < 1.0052","1/Pingbo_Under + 1/EB_Over < 1.0052"],
+       "both_pass":"ANOMALY_BOTH_DIRECTIONS","neither_pass":"NO_MATCH"},
+      "summary":{"eb_under_rows":len(eb_rows),"candidate_a":sum(x["rule_status"]=="CANDIDATE_A" for x in out),
+       "candidate_b":sum(x["rule_status"]=="CANDIDATE_B" for x in out),
+       "anomalies":sum(x["rule_status"]=="ANOMALY_BOTH_DIRECTIONS" for x in out),
+       "no_match":sum(x["rule_status"]=="NO_MATCH" for x in out),
+       "unmatched":sum(x["rule_status"] not in ("CANDIDATE_A","CANDIDATE_B","ANOMALY_BOTH_DIRECTIONS","NO_MATCH") for x in out)},
       "results":out,"safety":"只读校验，不含投注、订单、钱包或资金接口"}
+
 def markdown(r):
     lines=["# EB Under × Pingbo NBA 反向大小分校验","",
      f"时间：{r['generated_at_utc']}","",
@@ -135,14 +252,14 @@ def markdown(r):
 def main():
     p=argparse.ArgumentParser()
     p.add_argument("--snapshots",default="live_snapshots"); p.add_argument("--out",default="eb_pingbo_nba_validation.json")
-    p.add_argument("--report",default="eb_pingbo_nba_validation.md"); p.add_argument("--min-edge-percent",type=Decimal,default=Decimal("0"))
+    p.add_argument("--report",default="eb_pingbo_nba_validation.md"); p.add_argument("--min-edge-percent",type=Decimal,default=Decimal("0"),help="兼容旧参数；当前赔率阈值固定为 1.0052")
     p.add_argument("--interval",type=int,default=20); p.add_argument("--watch",action="store_true"); p.add_argument("--timeout",type=int,default=15)
     a=p.parse_args()
     if a.interval<5: p.error("--interval must be >=5")
     client=PingboClient(timeout=a.timeout)
     def once():
         eb,meta=get_eb_under(Path(a.snapshots)); pb=client.fetch_nba_details()
-        report=run_validation(eb,pb,a.min_edge_percent/100)
+        report=run_validation(eb,pb)
         report["source_meta"]={"eb":meta,"pingbo_nba_events":pb.get("nba_events"),"pingbo_errors":pb.get("errors",[])}
         Path(a.out).write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding="utf-8")
         Path(a.report).write_text(markdown(report),encoding="utf-8")
