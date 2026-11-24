@@ -23,7 +23,7 @@
       "cps": 50
     },
     "odds_params": {
-      "mcid": "FILL_IN_LOCALLY_FROM_CURRENT_READ_ONLY_REQUEST",
+      "mcid": "0",
       "cuid": "FILL_IN_LOCALLY_IF_REQUIRED"
     }
   },
