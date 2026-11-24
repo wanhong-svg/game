@@ -294,6 +294,8 @@ def monitor_loop(context, page, stop_event):
 
 
 def main():
+    import queue
+
     print("NBA盘口实时检索（只读）")
     print("浏览器将保持可见；请在浏览器中登录并打开 Pingbo 篮球赛事列表页。")
     print("命令：开始 / 结束 / 退出")
@@ -305,6 +307,20 @@ def main():
         viewport={"width": 1440, "height": 1000},
     )
     page = current_visible_page(context)
+    commands = queue.Queue()
+
+    def read_commands():
+        while True:
+            try:
+                command = input("\\n请输入命令 [开始/结束/退出]：").strip()
+            except EOFError:
+                command = "退出"
+            commands.put(command)
+            if command in {"退出", "exit", "quit", "q"}:
+                return
+
+    input_thread = threading.Thread(target=read_commands, daemon=True)
+    input_thread.start()
     try:
         try:
             if not page.url or page.url == "about:blank":
@@ -313,40 +329,58 @@ def main():
             print("浏览器页面加载等待超时；请检查页面后继续。")
         print(f"浏览器已启动，当前页面：{page.url}")
         print("如未登录，请先在浏览器完成登录并进入篮球赛事列表；然后在终端输入“开始”。")
-        worker = None
-        stop_event = threading.Event()
+        running = False
+        next_scan = 0.0
         while True:
             try:
-                command = input("\n请输入命令 [开始/结束/退出]：").strip()
-            except EOFError:
-                command = "退出"
+                command = commands.get(timeout=0.5)
+            except queue.Empty:
+                command = None
             if command in {"开始", "start", "START"}:
-                if worker and worker.is_alive():
+                if running:
                     print("监控已经在运行。")
-                    continue
-                stop_event = threading.Event()
-                worker = threading.Thread(target=monitor_loop,
-                    args=(context, page, stop_event), daemon=True)
-                worker.start()
-                print("已开始实时检索。浏览器不会跳转；输入“结束”停止。")
-            elif command in {"结束", "停止", "stop", "STOP"}:
-                if worker and worker.is_alive():
-                    stop_event.set()
-                    worker.join(timeout=10)
-                    print("监控已结束；浏览器仍保持打开。")
                 else:
-                    print("当前没有运行中的监控。")
+                    running = True
+                    next_scan = 0.0
+                    print("已开始实时检索。浏览器不会跳转；输入“结束”停止。")
+            elif command in {"结束", "停止", "stop", "STOP"}:
+                running = False
+                print("监控已结束；浏览器仍保持打开。")
             elif command in {"退出", "exit", "quit", "q"}:
-                if worker and worker.is_alive():
-                    stop_event.set()
-                    worker.join(timeout=10)
                 print("正在退出监控程序。")
                 break
-            else:
+            elif command is not None:
                 print("无法识别命令，请输入：开始、结束或退出")
+
+            if running and time.monotonic() >= next_scan:
+                try:
+                    if page.is_closed():
+                        raise RuntimeError("当前浏览器标签页已关闭")
+                    page_url = page.url
+                    changed = discover_api_origins(page)
+                    if changed:
+                        for name, info in changed.items():
+                            print(f"API域名自动更新 [{name}]：{info['old']} -> {info['new']}（命中 {info['observed_path_hits']} 个抓包接口请求）")
+                    cfg = load_endpoints()
+                    origin = cfg["apis"]["pingbo"]["base_url"].rstrip("/")
+                    host = urlsplit(origin).hostname
+                    pb_hosts = set(cfg["apis"]["pingbo"].get("hosts", []))
+                    page_host = urlsplit(page_url).hostname
+                    if not page_url.startswith("https://"):
+                        raise RuntimeError("当前页面不是 HTTPS，请切换到 Pingbo 篮球赛事列表页")
+                    if page_host not in pb_hosts and not changed.get("pingbo"):
+                        raise RuntimeError(f"当前页面域名 {page_host} 未识别为 Pingbo；请先打开 Pingbo 赛事列表页")
+                    if host not in pb_hosts:
+                        raise RuntimeError(f"API域名 {host} 未通过抓包接口域名校验")
+                    pb = fetch_nba_details(context, origin, page_url)
+                    (ROOT / "pingbo_nba_live_details.json").write_text(
+                        json.dumps(pb, ensure_ascii=False, indent=2), encoding="utf-8")
+                    print_results(pb)
+                except Exception as exc:
+                    print(f"\\n[本轮扫描失败] {type(exc).__name__}: {exc}")
+                    print("提示：确认浏览器停留在 Pingbo 页面、已登录，并且页面已加载赛事列表。")
+                next_scan = time.monotonic() + POLL_SECONDS
     finally:
-        # Closing this dedicated persistent context ends only the browser
-        # instance launched by this script; its local profile remains saved.
         context.close()
         playwright.stop()
 
