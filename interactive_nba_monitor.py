@@ -197,7 +197,7 @@ def extract_list_events(data):
 def fetch_nba_details(context, origin: str, referer: str, captured_headers: dict[str, str] | None = None) -> dict:
     common = {"locale": "zh_CN", "withCredentials": "true"}
     params = {
-        **common, "sportId": 4, "periodNumber": 0, "periodNumbers": -1,
+        **common, "sportId": 4, "leagueIds": "", "periodNumber": 0, "periodNumbers": -1,
         "betTypes": "HDP,OU,ML_1X2", "version": 0,
         "_": int(time.time() * 1000),
     }
