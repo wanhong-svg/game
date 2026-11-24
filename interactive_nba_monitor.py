@@ -178,7 +178,9 @@ def api_get(context, origin: str, path: str, params: dict, referer: str,
     if observed:
         observed_url = urlsplit(observed["url"])
         observed_params = dict(__import__("urllib.parse", fromlist=["parse_qsl"]).parse_qsl(observed_url.query, keep_blank_values=True))
-        observed_params.update({k: str(v) for k, v in request_params.items()})
+        for key, value in request_params.items():
+            if key == "eventId" or key not in observed_params:
+                observed_params[key] = str(value)
         request_params = observed_params
         origin = f"{observed_url.scheme}://{observed_url.netloc}"
     response = context.request.get(
