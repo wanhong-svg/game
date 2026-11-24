@@ -53,6 +53,29 @@ COMMON_PATHS = {
     "/api/match/sport/listbytype",
     "/api/match/live/get100Refactoring",
 }
+CAPTURED_HEADERS: dict[str, dict[str, str]] = {}
+
+
+def capture_browser_request(request) -> None:
+    try:
+        u = urlsplit(request.url)
+        if u.path in PINGBO_PATHS:
+            family = "pingbo"
+        elif u.path in EB_PATHS:
+            family = "eb"
+        elif u.path in COMMON_PATHS:
+            family = "common"
+        else:
+            return
+        blocked = {"host", "content-length", "cookie", "accept-encoding",
+                   "connection", "sec-fetch-site", "sec-fetch-mode",
+                   "sec-fetch-dest", "priority"}
+        CAPTURED_HEADERS[family] = {
+            k: v for k, v in request.headers.items()
+            if k.lower() not in blocked and not k.lower().startswith("sec-ch-")
+        }
+    except Exception:
+        return
 
 
 def utc_now() -> str:
@@ -137,17 +160,18 @@ def discover_api_origins(page) -> dict[str, str]:
     return changed
 
 
-def api_get(context, origin: str, path: str, params: dict, referer: str, captured_headers: dict[str, str] | None = None, timeout_ms: int = 15000):
+def api_get(context, origin: str, path: str, params: dict, referer: str,
+            captured_headers: dict[str, str] | None = None, timeout_ms: int = 15000):
     if path not in PINGBO_PATHS:
         raise ValueError(f"拒绝调用未在 HAR 白名单中的接口：{path}")
+    headers = dict(captured_headers or {})
+    headers.setdefault("Accept", "application/json, text/plain, */*")
+    headers["Referer"] = referer
+    headers.setdefault("Origin", f"{urlsplit(referer).scheme}://{urlsplit(referer).netloc}")
     response = context.request.get(
         origin.rstrip("/") + path,
         params=params,
-        headers={
-            "Accept": "application/json, text/plain, */*",
-            "Referer": referer,
-            "Origin": f"{urlsplit(referer).scheme}://{urlsplit(referer).netloc}",
-        },
+        headers=headers,
         timeout=timeout_ms,
     )
     if response.status in (401, 403):
@@ -307,6 +331,7 @@ def main():
         viewport={"width": 1440, "height": 1000},
     )
     page = current_visible_page(context)
+    page.on("request", capture_browser_request)
     commands = queue.Queue()
 
     def read_commands():
@@ -372,7 +397,10 @@ def main():
                         raise RuntimeError(f"当前页面域名 {page_host} 未识别为 Pingbo；请先打开 Pingbo 赛事列表页")
                     if host not in pb_hosts:
                         raise RuntimeError(f"API域名 {host} 未通过抓包接口域名校验")
-                    request_headers = CAPTURED_HEADERS.get("pingbo")\n                    if not request_headers:\n                        raise RuntimeError("尚未捕获到 Pingbo 列表接口请求头；请在浏览器刷新一次篮球赛事列表页，再输入“开始”。")\n                    pb = fetch_nba_details(context, origin, page_url, request_headers)
+                    request_headers = CAPTURED_HEADERS.get("pingbo")
+                    if not request_headers:
+                        raise RuntimeError("尚未捕获到 Pingbo 列表接口请求头；请在浏览器刷新一次篮球赛事列表页，再输入“开始”。")
+                    pb = fetch_nba_details(context, origin, page_url, request_headers)
                     (ROOT / "pingbo_nba_live_details.json").write_text(
                         json.dumps(pb, ensure_ascii=False, indent=2), encoding="utf-8")
                     print_results(pb)
