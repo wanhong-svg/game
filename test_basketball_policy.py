@@ -72,9 +72,11 @@ class BasketballPolicyTests(unittest.TestCase):
 
     def test_unknown_pingbo_event_is_preserved_for_review(self):
         cfg = json.loads(json.dumps(DEFAULT_CONFIG))
+        from datetime import datetime, timezone
+        observed_at = datetime.now(timezone.utc).isoformat()
         payload = {
-            "pingbo_events": [{"event_id": "p1", "home": "A", "away": "B", "observed_at_utc": "2026-11-24T12:00:00+00:00"}],
-            "pingbo_markets": [{"event_id": "p1", "market_key": "0", "side": "home", "signed_line": "-2.5", "decimal_odds": "1.91", "observed_at_utc": "2026-11-24T12:00:00+00:00"}]
+            "pingbo_events": [{"event_id": "p1", "home": "A", "away": "B", "observed_at_utc": observed_at}],
+            "pingbo_markets": [{"event_id": "p1", "market_key": "0", "side": "home", "signed_line": "-2.5", "decimal_odds": "1.91", "observed_at_utc": observed_at}]
         }
         rows = normalize_rows(payload, cfg)
         self.assertEqual(len(rows), 1)
