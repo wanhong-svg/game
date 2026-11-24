@@ -440,12 +440,11 @@ def main():
     input_thread.start()
     try:
         try:
-            if not page.url or page.url == "about:blank":
-                target_url = input("请输入 EB 模拟环境页面地址（HTTPS）：").strip()
-                parsed_target = urlsplit(target_url)
-                if parsed_target.scheme != "https" or not parsed_target.hostname:
-                    raise ValueError("必须输入有效的 HTTPS 模拟环境地址。")
-                page.goto(target_url, wait_until="domcontentloaded", timeout=30000)
+            target_url = input("请输入 EB 模拟环境页面地址（HTTPS）：").strip()
+            parsed_target = urlsplit(target_url)
+            if parsed_target.scheme != "https" or not parsed_target.hostname:
+                raise ValueError("必须输入有效的 HTTPS 模拟环境地址。")
+            page.goto(target_url, wait_until="domcontentloaded", timeout=30000)
         except PlaywrightTimeoutError:
             print("浏览器页面加载等待超时；请检查页面后继续。")
         print(f"浏览器已启动，当前页面：{page.url}")
