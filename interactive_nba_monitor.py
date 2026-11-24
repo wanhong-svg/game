@@ -285,10 +285,12 @@ def print_results(pb: dict) -> None:
         validation = run_validation(eb_rows, pb, __import__("decimal").Decimal("0"))
         out_json = ROOT / "eb_pingbo_nba_validation.json"
         out_json.write_text(json.dumps(validation, ensure_ascii=False, indent=2), encoding="utf-8")
-        print(f"\nEB Under × Pingbo Over 校验：通过 {validation['summary']['rule_pass']} / 未通过 {validation['summary']['rule_fail']} / 未匹配 {validation['summary']['unmatched']}")
+        print(f"\nEB Under 入口 × 双向赔率校验：候选A {validation['summary']['candidate_a']} / 候选B {validation['summary']['candidate_b']} / 双向异常 {validation['summary']['anomalies']} / 无匹配 {validation['summary']['no_match']} / 赛事或进程未确认 {validation['summary']['unmatched']}")
         for row in validation["results"]:
-            calc = row.get("calculation") or {}
-            print(f"  {row.get('home_team')} vs {row.get('away_team')} | EB 小{row.get('points')} @{row.get('odds_decimal')} | PB 大{row.get('pingbo_points') or row.get('points')} @{row.get('pingbo_odds_decimal','-')} | 合并概率 {calc.get('combined_implied_probability','-')} | Edge {calc.get('edge_percent','-')} | {row['rule_status']}")
+            checks = row.get("cross_checks") or {}
+            a = checks.get("A_pingbo_over_plus_eb_under") or {}
+            b = checks.get("B_pingbo_under_plus_eb_over") or {}
+            print(f"  {row.get('home_team')} vs {row.get('away_team')} | EB小{row.get('points')} @{row.get('odds_decimal')} | PB大{row.get('pingbo_points','-')} | A倒数和 {a.get('reciprocal_sum','-')} | B倒数和 {b.get('reciprocal_sum','-')} | 候选EB赔率 {row.get('candidate_odds_decimal','-')} | {row['rule_status']}")
         print(f"校验JSON：{out_json}")
     except FileNotFoundError:
         print("\n尚未发现 EB_events_latest.json / EB_markets_latest.json；本轮只输出 Pingbo NBA 详情。请先启动现有 EB 只读刷新程序。")
