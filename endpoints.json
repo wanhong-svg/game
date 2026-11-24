@@ -41,13 +41,16 @@
         "/yewu11/v1/m/matchDetail/getESMatchOddsInfoPB",
         "/yewu11/v1/m/getMatchBaseInfoByMidsPB",
         "/yewu11/v1/m/esportsMatchesPB",
-        "/yewu11/v1/w/category/getCategoryList"
+        "/yewu11/v1/w/category/getCategoryList",
+        "/yewu11/v1/m/noLiveMatchesPagePB",
+        "/yewu11/v1/w/matchDetail/getMatchDetailPB"
       ],
       "bet_paths": [
         "/yewu13/v1/betOrder/client/queryLatestMarketInfo",
         "/yewu13/v1/betOrder/client/queryMarketMaxMinBetMoney",
         "/yewu13/v1/betOrder/client/bet"
-      ]
+      ],
+      "nba_read_base_url": "https://api.r4bud5u7.com"
     },
     "common": {
       "base_url": "https://api.live336.com",
