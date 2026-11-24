@@ -59,6 +59,15 @@ class PingboNBATests(unittest.TestCase):
         self.assertEqual(rows[0]["points"], "213.5")
         self.assertEqual(rows[0]["pingbo_odds_american"], "-105")
 
+    def test_chinese_eb_team_names_match_pingbo_english_names(self):
+        pb = extract_full_game_totals(self.event, self.league)
+        eb = [{
+            "home_team": "奥兰多魔术队", "away_team": "底特律活塞队",
+            "period": "FULL_GAME", "handicap": "213.5",
+            "selection": "Under", "odds": "1.95"
+        }]
+        self.assertEqual(len(match_reversed_totals(eb, pb)), 1)
+
     def test_different_line_does_not_match(self):
         pb = extract_full_game_totals(self.event, self.league)
         eb = [{
