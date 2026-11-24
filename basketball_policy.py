@@ -92,11 +92,17 @@ def load_config(path):
 
 def classify_league(event, cfg):
     raw = norm(event.get("league"))
+    if not raw:
+        return None
     aliases = cfg.get("event_filter", {}).get("league_aliases", {})
     for canonical in cfg.get("event_filter", {}).get("basketball_whitelist", ["FRANCE_WOMEN_LFB"]):
         names = [canonical] + aliases.get(canonical, [])
-        if any(norm(x) in raw or raw in norm(x) for x in names if norm(x)):
-            return canonical
+        # Match only a configured alias contained in a non-empty source label.
+        # Never allow the empty string or a short fragment to match every league.
+        for name in names:
+            alias = norm(name)
+            if alias and (raw == alias or (len(alias) >= 4 and alias in raw)):
+                return canonical
     return None
 
 
@@ -208,7 +214,8 @@ def normalize_rows(payload, cfg):
                 paired_ev = evmap.get((paired.get("venue_event"), str(paired.get("event_id"))), {})
                 ev = {**ev, "sport": paired_ev.get("sport", paired_ev.get("sport_type")),
                       "league": paired_ev.get("league"), "home": paired_ev.get("home"), "away": paired_ev.get("away")}
-        if not is_basketball(ev):
+        pingbo_identity_unverified = (venue == "PINGBO" and not (ev.get("sport") or ev.get("sport_type") or ev.get("league")))
+        if not is_basketball(ev) and not pingbo_identity_unverified:
             continue
 
         league = classify_league(ev, cfg)
@@ -216,7 +223,9 @@ def normalize_rows(payload, cfg):
         platform = "PINNACLE" if venue == "PINGBO" else "PANDA"
         p_cfg = cfg.get("platforms", {}).get(platform, {})
 
-        if league is None:
+        if pingbo_identity_unverified:
+            status, reason = "NEEDS_REVIEW", "Pingbo 缺少可验证的运动类型/联赛信息，保留数据但不认定为目标联赛"
+        elif league is None:
             status, reason = "EVENT_OUT_OF_SCOPE", "赛事不在法国女子篮球联赛（LFB / Wonderligue）白名单或联赛别名未配置"
         elif market_type not in ALLOWED_MARKETS:
             status, reason = "UNSUPPORTED_MARKET", "仅允许全场让分、全场大小分、全场独赢；未知或未配置玩法不猜测"
@@ -268,6 +277,7 @@ def normalize_rows(payload, cfg):
                 "source_event_id": row.get("event_id"),
                 "competition": ev.get("league"),
                 "canonical_competition": league,
+                "sport_verification": "UNVERIFIED" if pingbo_identity_unverified else "VERIFIED_FROM_EVENT",
                 "home_team": ev.get("home"),
                 "away_team": ev.get("away"),
                 "market_type": market_type,
