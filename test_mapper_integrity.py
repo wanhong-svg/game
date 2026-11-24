@@ -25,6 +25,14 @@ class MapperIntegrityTests(unittest.TestCase):
         self.assertEqual(row["home"], "Explicit Home")
         self.assertEqual(row["away"], "Explicit Away")
 
+    def test_eb_current_and_legacy_api_hosts_are_recognized(self):
+        self.assertEqual(identify_venue("https://api.dbsportxxx278gwf4.com/yewu11/v1/m/matchesPagePB"), "EB")
+        self.assertEqual(identify_venue("https://api.r4bud5u7.com/yewu11/v1/m/matchesPagePB"), "EB")
+        self.assertEqual(identify_venue("https://api.dbsportxxx278gwf4.com/yewu13/v1/betOrder/client/bet"), "EB")
+
+    def test_common_ob_match_list_is_classified_as_eb(self):
+        self.assertEqual(identify_venue("https://api.live336.com/api/match/sport/listbytype?gameType=OB"), "EB")
+
     def test_pingbo_current_and_legacy_hosts_are_recognized(self):
         self.assertEqual(identify_venue("https://www.pin135.com/sports-service/sv/compact/events"), "PINGBO")
         self.assertEqual(identify_venue("https://www.part567.com/sports-service/sv/compact/events"), "PINGBO")
