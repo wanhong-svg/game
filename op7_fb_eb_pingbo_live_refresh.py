@@ -51,16 +51,58 @@ class AuthenticationRequired(RuntimeError):
   self.site=site; self.status=status; self.url=url
   super().__init__(f'{site} HTTP {status}: 登录会话失效或无权访问；请使用 --setup-session {site} 重新登录并检查账号权限')
 
-def request_json(ctx,url,method,headers,params=None,body=None,timeout_ms=15000):
+# Exact request templates observed in the already-authenticated visible browser tabs.
+# Cookies stay in Playwright's browser-context cookie jar; no credential is written to disk.
+CAPTURED_REQUESTS={}
+CAPTURED_ORIGINS={}
+
+def capture_request(request, family):
+ try:
+  p=urllib.parse.urlsplit(request.url)
+  if p.scheme!='https' or p.path not in ALLOW.get(p.netloc,set()): return
+  key=(family,p.path)
+  headers={k:v for k,v in request.headers.items()
+   if k.lower() not in {'cookie','host','content-length','connection','accept-encoding','transfer-encoding'}
+   and not k.lower().startswith('sec-')}
+  CAPTURED_REQUESTS[key]={'method':request.method,'url':request.url,'headers':headers,'post_data':request.post_data}
+  CAPTURED_ORIGINS[family]=f'{p.scheme}://{p.netloc}'
+  # Permit only this host/path pair after observing the request in the browser.
+  ALLOW.setdefault(p.netloc,set()).add(p.path)
+ except Exception:
+  return
+
+def request_json(ctx,url,method,headers,params=None,body=None,timeout_ms=15000,family=None):
  p=urllib.parse.urlsplit(url)
  if p.scheme!='https' or p.netloc not in ALLOW or p.path not in ALLOW[p.netloc] or method not in ('GET','POST'):
   raise ValueError('Blocked non-allow-listed destination or method')
- if params:
-  q=urllib.parse.urlencode(params,doseq=True); url+=('&' if '?' in url else '?')+q
- if method=='GET': r=ctx.request.get(url,headers=headers,timeout=timeout_ms)
- else: r=ctx.request.post(url,headers=headers,data=body or {},timeout=timeout_ms)
+ template=CAPTURED_REQUESTS.get((family,p.path)) if family else None
+ req_headers=dict(template['headers']) if template else dict(headers or {})
+ req_headers.update({k:v for k,v in (headers or {}).items() if k.lower() not in {'cookie','host','content-length'}})
+ if template:
+  observed=urllib.parse.urlsplit(template['url'])
+  query=dict(urllib.parse.parse_qsl(observed.query,keep_blank_values=True))
+  query.update({k:str(v) for k,v in (params or {}).items()})
+  url=f'{CAPTURED_ORIGINS.get(family, p.scheme+"://"+p.netloc)}{p.path}'
+  if query: url+='?'+urllib.parse.urlencode(query,doseq=True)
+  method=template['method']
+  raw=template.get('post_data')
+  observed_body={}
+  if raw:
+   try: observed_body=json.loads(raw)
+   except Exception:
+    try: observed_body=dict(urllib.parse.parse_qsl(raw,keep_blank_values=True))
+    except Exception: observed_body={}
+  if body is not None:
+   if isinstance(body,dict): observed_body.update(body)
+   else: observed_body=body
+  body=observed_body if method=='POST' else None
+ else:
+  if params:
+   q=urllib.parse.urlencode(params,doseq=True); url+=('&' if '?' in url else '?')+q
+ if method=='GET': r=ctx.request.get(url,headers=req_headers,timeout=timeout_ms)
+ else: r=ctx.request.post(url,headers=req_headers,data=body or {},timeout=timeout_ms)
  if r.status in (401,403):
-  site='pingbo' if p.netloc in PINGBO_HOSTS else 'op7'
+  site='pingbo' if family=='pingbo' else 'op7'
   raise AuthenticationRequired(site,r.status,f'{p.netloc}{p.path}')
  if not r.ok: raise RuntimeError(f'HTTP {r.status} from {p.netloc}{p.path}')
  return unwrap(r.json())
@@ -167,12 +209,15 @@ def main():
  profiles=Path(a.profiles_dir); (profiles/'op7').mkdir(parents=True,exist_ok=True); (profiles/'pingbo').mkdir(parents=True,exist_ok=True)
  out=Path(a.out); oh=headers_env('OP7_READONLY_HEADERS_JSON'); ph=headers_env('PINGBO_READONLY_HEADERS_JSON')
  with sync_playwright() as p:
-  opctx=p.chromium.launch_persistent_context(str(profiles/'op7'),headless=True,args=['--no-sandbox','--disable-dev-shm-usage'])
-  pbctx=p.chromium.launch_persistent_context(str(profiles/'pingbo'),headless=True,args=['--no-sandbox','--disable-dev-shm-usage'])
+  opctx=p.chromium.launch_persistent_context(str(profiles/'op7'),headless=False,args=['--no-sandbox','--disable-dev-shm-usage'])
+  pbctx=p.chromium.launch_persistent_context(str(profiles/'pingbo'),headless=False,args=['--no-sandbox','--disable-dev-shm-usage'])
   try:
-   for ctx,url,label in ((opctx,SITES['OP7_WEB'],'OP7'),(pbctx,SITES['PINGBO_WEB'],'Pingbo')):
+   for ctx,url,label,family in ((opctx,SITES['OP7_WEB'],'OP7','op7'),(pbctx,SITES['PINGBO_WEB'],'Pingbo','pingbo')):
     page=ctx.pages[0] if ctx.pages else ctx.new_page()
-    try: page.goto(url,wait_until='domcontentloaded',timeout=a.timeout*1000)
+    page.on('request',lambda req,f=family: capture_request(req,f))
+    try:
+     if page.url=='about:blank': page.goto(url,wait_until='domcontentloaded',timeout=a.timeout*1000)
+     else: page.reload(wait_until='domcontentloaded',timeout=a.timeout*1000)
     except PlaywrightTimeoutError: print(f'{label} page warm-up timeout; continue with existing session',file=sys.stderr)
    fb_list=[]; eb_list=[]; pb_list=[]; clocks={'fb_list':0,'fb_odds':0,'eb_list':0,'eb_odds':0,'pb':0}; started=time.monotonic()
    print('只读实时刷新已启动；不会调用投注、订单、钱包或资金接口。Ctrl+C停止。')
@@ -183,7 +228,7 @@ def main():
     # FB list
     if tick-clocks['fb_list']>=a.fb_list_interval or not fb_list:
      try:
-      res=request_json(opctx,SITES['FB_ORIGIN']+'/v1/match/getList','POST',oh,body=fb_body,timeout_ms=a.timeout*1000)
+      res=request_json(opctx,SITES['FB_ORIGIN']+'/v1/match/getList','POST',oh,body=fb_body,timeout_ms=a.timeout*1000,family='op7')
       fb_list=fb_events(res); save_latest(out,'FB_events',fb_list); clocks['fb_list']=time.monotonic()
       print(f'[{now()}] FB赛事列表刷新：{len(fb_list)}场')
      except Exception as e:
@@ -193,7 +238,7 @@ def main():
     # EB list
     if tick-clocks['eb_list']>=a.eb_list_interval or not eb_list:
      try:
-      res=request_json(opctx,SITES['EB_ORIGIN']+'/yewu11/v1/m/matchesPagePB','POST',oh,body=eb_body,timeout_ms=a.timeout*1000)
+      res=request_json(opctx,SITES['EB_ORIGIN']+'/yewu11/v1/m/matchesPagePB','POST',oh,body=eb_body,timeout_ms=a.timeout*1000,family='op7')
       eb_list=[x for x in eb_events(res) if 'nba' in str(x.get('league') or '').lower() or '美国职业篮球' in str(x.get('league') or '')]; save_latest(out,'EB_events',eb_list); clocks['eb_list']=time.monotonic()
       print(f'[{now()}] EB赛事列表刷新：{len(eb_list)}场')
      except Exception as e:
@@ -204,7 +249,7 @@ def main():
     if tick-clocks['pb']>=a.pingbo_interval or not pb_list:
      try:
       pb_params=dict(pb_q); pb_params.setdefault('_',str(int(time.time()*1000)))
-      res=request_json(pbctx,SITES['PINGBO_ORIGIN']+'/sports-service/sv/compact/events','GET',ph,params=pb_params,timeout_ms=a.timeout*1000)
+      res=request_json(pbctx,SITES['PINGBO_ORIGIN']+'/sports-service/sv/compact/events','GET',ph,params=pb_params,timeout_ms=a.timeout*1000,family='pingbo')
       fetched_at=now()
       pb_list=mapper.extract_pingbo_events(res)
       for event in pb_list: event['observed_at_utc']=fetched_at
@@ -222,7 +267,7 @@ def main():
      for ev in fb_list[:max(0,a.fb_max_events)]:
       try:
        body=dict(fb_detail); body['matchId']=ev['id']
-       res=request_json(opctx,SITES['FB_ORIGIN']+'/v1/match/getMatchDetail','POST',oh,body=body,timeout_ms=a.timeout*1000)
+       res=request_json(opctx,SITES['FB_ORIGIN']+'/v1/match/getMatchDetail','POST',oh,body=body,timeout_ms=a.timeout*1000,family='op7')
        d=data_of(res); markets,bad=mapper.flatten_fb_markets(d,2,ev['id'])
        for row in markets: row['observed_at_utc']=now()
        rows.extend(markets)
@@ -242,7 +287,7 @@ def main():
      for ev in eb_list[:max(0,a.eb_max_events)]:
       try:
        q=dict(eb_q); q['mid']=ev['id']
-       res=request_json(opctx,SITES['EB_ORIGIN']+'/yewu11/v1/m/matchDetail/getMatchOddsInfoPB','GET',oh,params=q,timeout_ms=a.timeout*1000)
+       res=request_json(opctx,SITES['EB_ORIGIN']+'/yewu11/v1/m/matchDetail/getMatchOddsInfoPB','GET',oh,params=q,timeout_ms=a.timeout*1000,family='op7')
        d=data_of(res); markets,bad=mapper.flatten_eb_markets(d,2,{})
        rows.extend(markets)
       except Exception as e:
