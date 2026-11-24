@@ -125,10 +125,23 @@ def reverse_side(side: str) -> str:
     raise ValueError(f"unsupported totals side: {side}")
 
 
+TEAM_ALIASES = {
+    "奥兰多魔术": "orlandomagic", "奥兰多魔术队": "orlandomagic",
+    "底特律活塞": "detroitpistons", "底特律活塞队": "detroitpistons",
+    "华盛顿奇才": "washingtonwizards", "华盛顿奇才队": "washingtonwizards",
+    "波士顿凯尔特人": "bostonceltics", "波士顿凯尔特人队": "bostonceltics",
+    "丹佛掘金": "denvernuggets", "丹佛掘金队": "denvernuggets",
+    "达拉斯小牛": "dallasmavericks", "达拉斯独行侠": "dallasmavericks",
+    "达拉斯小牛队": "dallasmavericks", "达拉斯独行侠队": "dallasmavericks",
+}
+
+
 def normalize_team_name(value: str | None) -> str:
     if not value:
         return ""
     text = value.lower().strip()
+    if text in TEAM_ALIASES:
+        return TEAM_ALIASES[text]
     for suffix in ("队", "team"):
         if text.endswith(suffix):
             text = text[:-len(suffix)]
@@ -169,11 +182,13 @@ def match_reversed_totals(eb_rows: list[dict[str, Any]],
             continue
         side = reverse_side(str(eb.get("selection") or eb.get("side") or "Under"))
         points = str(Decimal(str(eb.get("handicap") or eb.get("points"))).normalize())
-        key = (normalize_team_name(eb.get("home_team_en") or eb.get("home_team")),
-               normalize_team_name(eb.get("away_team_en") or eb.get("away_team")),
-               f"{points}|{side}")
+        eb_home = normalize_team_name(eb.get("home_team_en") or eb.get("home_team"))
+        eb_away = normalize_team_name(eb.get("away_team_en") or eb.get("away_team"))
+        key = (eb_home, eb_away, f"{points}|{side}")
         pb = by_key.get(key)
         if not pb:
+            # Do not guess reversed home/away orientation: only accept a
+            # canonical team-pair match from known English/Chinese aliases.
             continue
         matches.append({
             "event_id": eb.get("event_id") or eb.get("mid"),
