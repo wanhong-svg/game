@@ -61,6 +61,12 @@ def build_bet_payload(selection, stake, odds_value=None):
     play_option_name = option.get("otv") or option.get("onb") or option.get("on")
     if not play_option_name:
         raise ValueError("selection has no display name (otv/onb/on)")
+    if not all(event.get(k) not in (None, "") for k in ("mid", "tid", "csid", "csna")):
+        raise ValueError("event is missing one of mid/tid/csid/csna")
+    if not market.get("hpid") or not market.get("hpn") or not group.get("hid") or not option.get("oid"):
+        raise ValueError("market/group/option is missing required live IDs or names")
+    if not selection.get("market_type_finally"):
+        raise ValueError("market_type_finally must come from the live market context; no default is assumed")
     odds_decimal = Decimal(raw_odds) / Decimal(100000)
     detail = {
         "playId": str(market["hpid"]), "matchType": int(selection["match_type"]),
@@ -230,7 +236,8 @@ def parse_bet_result(response):
         "bet_money_total_yuan": str(total_fen / Decimal(100)) if total_fen is not None else None,
     }
 
-\ndef _allowed_test_host(host):
+
+def _allowed_test_host(host):
     host = host.lower().rstrip(".")
     explicit = {x.strip().lower().rstrip(".") for x in os.environ.get("OP7_TEST_BET_ALLOWED_HOSTS", "").split(",") if x.strip()}
     if host in explicit:
@@ -329,6 +336,29 @@ def submit_test_bet(selection, stake, timeout=15, cross_odds_refresh=None):
         raise RuntimeError("stake exceeds OP7_TEST_BET_MAX_STAKE; stopped before bet")
 
     payload = build_bet_payload(selection, amount, odds_value=int(odds_value))
+    if cross_odds_refresh is None:
+        raise RuntimeError("必须提供双边实时赔率刷新回调；未完成5秒内A/B复核，禁止发送投注")
+    cross_check = refresh_and_validate_cross_odds(cross_odds_refresh, max_seconds=5.0)
+    selected_side = str(selection["option"].get("ot") or "").lower()
+    if selected_side != cross_check["direction"].lower():
+        raise RuntimeError("候选方向与最新A/B复核方向不一致；禁止发送投注")
+    key = _candidate_key(selection)
+    if ORDER_AUDIT_PATH.exists():
+        try:
+            prior = json.loads(ORDER_AUDIT_PATH.read_text(encoding="utf-8")).get("records", [])
+        except (OSError, json.JSONDecodeError):
+            raise RuntimeError("bet order audit file is unreadable; refusing to submit")
+        if any(x.get("candidate_key") == key and x.get("state") in {"PREPARED", "ACCEPTED", "UNKNOWN"} for x in prior):
+            raise RuntimeError("duplicate candidate already submitted or has uncertain outcome; refusing duplicate")
+    _write_order_audit({
+        "candidate_key": key, "state": "PREPARED",
+        "created_at_utc": datetime.now(timezone.utc).isoformat(),
+        "event_id": str(selection["event"].get("mid")),
+        "market_id": str(selection["group"].get("hid")),
+        "option_id": str(selection["option"].get("oid")),
+        "direction": selected_side, "stake_yuan": str(amount),
+        "cross_check": {k: v for k, v in cross_check.items() if k != "snapshot"},
+    })
     try:
         bet_response = post_json(base_url, BET_PATH, payload, headers, timeout)
         parsed_result = parse_bet_result(bet_response)
