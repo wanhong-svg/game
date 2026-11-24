@@ -205,7 +205,8 @@ def flatten_pingbo_markets(event):
             if odds is None or odds<=1: continue
             rows.append({'venue':'PINGBO','event_id':event['event_id'],'market_key':'0','market_label':'抓包结构key=0（历史脚本按让球解析）',
               'side':side,'line':r[line_idx],'signed_line':r[idx],'decimal_odds':str(odds),'display_europe':trunc(odds,2),
-              'selection_id':r[7] if len(r)>7 else None,'raw_status_fields':r[5:7],\n              'observed_at_utc':event.get('observed_at_utc')})
+              'selection_id':r[7] if len(r)>7 else None,'raw_status_fields':r[5:7],
+              'observed_at_utc':event.get('observed_at_utc')})
     for r in markets.get('1',[]) if isinstance(markets,dict) else []:
         if not isinstance(r,list) or len(r)<4: continue
         line=r[0]; total=dec(r[1]); over=dec(r[2]); under=dec(r[3])
