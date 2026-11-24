@@ -194,7 +194,7 @@ def main():
     if tick-clocks['eb_list']>=a.eb_list_interval or not eb_list:
      try:
       res=request_json(opctx,SITES['EB_ORIGIN']+'/yewu11/v1/m/matchesPagePB','POST',oh,body=eb_body,timeout_ms=a.timeout*1000)
-      eb_list=eb_events(res); save_latest(out,'EB_events',eb_list); clocks['eb_list']=time.monotonic()
+      eb_list=[x for x in eb_events(res) if 'nba' in str(x.get('league') or '').lower() or '美国职业篮球' in str(x.get('league') or '')]; save_latest(out,'EB_events',eb_list); clocks['eb_list']=time.monotonic()
       print(f'[{now()}] EB赛事列表刷新：{len(eb_list)}场')
      except Exception as e:
       save_failure(out,'EB_events',e); print(f'EB列表刷新失败：{type(e).__name__}: {e}',file=sys.stderr)
