@@ -53,7 +53,8 @@ COMMON_PATHS = {
     "/api/match/sport/listbytype",
     "/api/match/live/get100Refactoring",
 }
-CAPTURED_HEADERS: dict[str, dict[str, str]] = {}\nCAPTURED_REQUESTS: dict[str, dict] = {}
+CAPTURED_HEADERS: dict[str, dict[str, str]] = {}
+CAPTURED_REQUESTS: dict[str, dict] = {}
 
 
 def capture_browser_request(request) -> None:
