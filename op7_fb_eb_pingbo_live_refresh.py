@@ -59,13 +59,15 @@ CAPTURED_ORIGINS={}
 def capture_request(request, family):
  try:
   p=urllib.parse.urlsplit(request.url)
-  if p.scheme!='https' or p.path not in ALLOW.get(p.netloc,set()): return
-  key=(family,p.path)
+  known_paths={path for paths in ALLOW.values() for path in paths}
+  if p.scheme!='https' or p.path not in known_paths: return
+  api_family='pingbo' if p.path.startswith('/sports-service/') else ('eb' if p.path.startswith('/yewu11/') else 'fb')
+  key=(api_family,p.path)
   headers={k:v for k,v in request.headers.items()
    if k.lower() not in {'cookie','host','content-length','connection','accept-encoding','transfer-encoding'}
    and not k.lower().startswith('sec-')}
   CAPTURED_REQUESTS[key]={'method':request.method,'url':request.url,'headers':headers,'post_data':request.post_data}
-  CAPTURED_ORIGINS[family]=f'{p.scheme}://{p.netloc}'
+  CAPTURED_ORIGINS[api_family]=f'{p.scheme}://{p.netloc}'
   # Permit only this host/path pair after observing the request in the browser.
   ALLOW.setdefault(p.netloc,set()).add(p.path)
  except Exception:
@@ -219,6 +221,10 @@ def main():
      if page.url=='about:blank': page.goto(url,wait_until='domcontentloaded',timeout=a.timeout*1000)
      else: page.reload(wait_until='domcontentloaded',timeout=a.timeout*1000)
     except PlaywrightTimeoutError: print(f'{label} page warm-up timeout; continue with existing session',file=sys.stderr)
+   # Prefer API origins observed from real requests emitted by the logged-in tabs.
+   if 'fb' in CAPTURED_ORIGINS: SITES['FB_ORIGIN']=CAPTURED_ORIGINS['fb']
+   if 'eb' in CAPTURED_ORIGINS: SITES['EB_ORIGIN']=CAPTURED_ORIGINS['eb']
+   if 'pingbo' in CAPTURED_ORIGINS: SITES['PINGBO_ORIGIN']=CAPTURED_ORIGINS['pingbo']
    fb_list=[]; eb_list=[]; pb_list=[]; clocks={'fb_list':0,'fb_odds':0,'eb_list':0,'eb_odds':0,'pb':0}; started=time.monotonic()
    print('只读实时刷新已启动；不会调用投注、订单、钱包或资金接口。Ctrl+C停止。')
    while True:
@@ -228,7 +234,7 @@ def main():
     # FB list
     if tick-clocks['fb_list']>=a.fb_list_interval or not fb_list:
      try:
-      res=request_json(opctx,SITES['FB_ORIGIN']+'/v1/match/getList','POST',oh,body=fb_body,timeout_ms=a.timeout*1000,family='op7')
+      res=request_json(opctx,SITES['FB_ORIGIN']+'/v1/match/getList','POST',oh,body=fb_body,timeout_ms=a.timeout*1000,family='fb')
       fb_list=fb_events(res); save_latest(out,'FB_events',fb_list); clocks['fb_list']=time.monotonic()
       print(f'[{now()}] FB赛事列表刷新：{len(fb_list)}场')
      except Exception as e:
@@ -238,7 +244,7 @@ def main():
     # EB list
     if tick-clocks['eb_list']>=a.eb_list_interval or not eb_list:
      try:
-      res=request_json(opctx,SITES['EB_ORIGIN']+'/yewu11/v1/m/matchesPagePB','POST',oh,body=eb_body,timeout_ms=a.timeout*1000,family='op7')
+      res=request_json(opctx,SITES['EB_ORIGIN']+'/yewu11/v1/m/matchesPagePB','POST',oh,body=eb_body,timeout_ms=a.timeout*1000,family='eb')
       eb_list=[x for x in eb_events(res) if 'nba' in str(x.get('league') or '').lower() or '美国职业篮球' in str(x.get('league') or '')]; save_latest(out,'EB_events',eb_list); clocks['eb_list']=time.monotonic()
       print(f'[{now()}] EB赛事列表刷新：{len(eb_list)}场')
      except Exception as e:
@@ -267,7 +273,7 @@ def main():
      for ev in fb_list[:max(0,a.fb_max_events)]:
       try:
        body=dict(fb_detail); body['matchId']=ev['id']
-       res=request_json(opctx,SITES['FB_ORIGIN']+'/v1/match/getMatchDetail','POST',oh,body=body,timeout_ms=a.timeout*1000,family='op7')
+       res=request_json(opctx,SITES['FB_ORIGIN']+'/v1/match/getMatchDetail','POST',oh,body=body,timeout_ms=a.timeout*1000,family='fb')
        d=data_of(res); markets,bad=mapper.flatten_fb_markets(d,2,ev['id'])
        for row in markets: row['observed_at_utc']=now()
        rows.extend(markets)
@@ -287,7 +293,7 @@ def main():
      for ev in eb_list[:max(0,a.eb_max_events)]:
       try:
        q=dict(eb_q); q['mid']=ev['id']
-       res=request_json(opctx,SITES['EB_ORIGIN']+'/yewu11/v1/m/matchDetail/getMatchOddsInfoPB','GET',oh,params=q,timeout_ms=a.timeout*1000,family='op7')
+       res=request_json(opctx,SITES['EB_ORIGIN']+'/yewu11/v1/m/matchDetail/getMatchOddsInfoPB','GET',oh,params=q,timeout_ms=a.timeout*1000,family='eb')
        d=data_of(res); markets,bad=mapper.flatten_eb_markets(d,2,{})
        rows.extend(markets)
       except Exception as e:
