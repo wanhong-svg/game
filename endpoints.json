@@ -75,12 +75,22 @@
         "www.pin135.com"
       ],
       "read_paths": [
-        "/sports-service/sv/compact/events"
+        "/sports-service/sv/compact/events",
+        "/sports-service/sv/mobile/sports",
+        "/sports-service/sv/mobile/leagues",
+        "/sports-service/sv/mobile/market-filters",
+        "/sports-service/sv/mobile/odds-live",
+        "/sports-service/sv/mobile/odds-today",
+        "/sports-service/sv/mobile/league-events",
+        "/sports-service/sv/mobile/event"
       ],
       "auxiliary_paths": [
         "/sports-service/sv/compact/carousels",
         "/sports-service/sv/compact/sports-markets",
         "/sports-service/sv/compact/leagues"
+      ],
+      "detail_paths": [
+        "/sports-service/sv/mobile/event"
       ]
     }
   },
