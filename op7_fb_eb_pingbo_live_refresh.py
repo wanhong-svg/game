@@ -130,7 +130,7 @@ def eb_events(payload):
  for x in d if isinstance(d,list) else []:
   if not isinstance(x,dict): continue
   mid=x.get('mid') or x.get('id'); home=x.get('mhn') or x.get('homeName'); away=x.get('man') or x.get('awayName')
-  if mid and home and away: out.append({'id':str(mid),'home':str(home),'away':str(away),'raw_status':x.get('mst'),'phase_mmp':x.get('mmp'),'league':x.get('tnjc') or x.get('leagueName') or x.get('tn'),'sport':x.get('csna') or x.get('sportName') or x.get('sport'),'start_time_ms':x.get('mgt') or x.get('startTime'),'raw_event_fields':sorted(x.keys())})
+  if mid and home and away: out.append({'id':str(mid),'home':str(home),'away':str(away),'raw_status':x.get('mst'),'phase_mmp':x.get('mmp'),'is_live':x.get('isLive') if isinstance(x.get('isLive'),bool) else None,'period_label':x.get('periodLabel') or x.get('periodName'),'clock_seconds':x.get('clockSeconds') or x.get('elapsedSeconds') or x.get('remainingSeconds'),'league':x.get('tnjc') or x.get('leagueName') or x.get('tn'),'sport':x.get('csna') or x.get('sportName') or x.get('sport'),'start_time_ms':x.get('mgt') or x.get('startTime'),'raw_event_fields':sorted(x.keys())})
  return out
 
 def save_latest(out,name,payload,status='SUCCESS',details=None):
