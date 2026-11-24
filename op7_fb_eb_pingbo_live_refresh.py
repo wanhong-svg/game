@@ -12,18 +12,19 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 import op7_fb_eb_venue_mapper as mapper
 
+ENDPOINTS=json.loads((Path(__file__).with_name('endpoints.json')).read_text(encoding='utf-8'))
 SITES={
- 'OP7_WEB':'https://op7.io/zh/',
- 'FB_ORIGIN':'https://api.738z3.com',
- 'EB_ORIGIN':'https://api.r4bud5u7.com',
- 'PINGBO_WEB':'https://www.pin135.com/',
- 'PINGBO_ORIGIN':'https://www.pin135.com',
+ 'OP7_WEB':ENDPOINTS['web']['op7']['base_url'],
+ 'FB_ORIGIN':ENDPOINTS['apis']['fb']['base_url'],
+ 'EB_ORIGIN':ENDPOINTS['apis']['eb']['base_url'],
+ 'PINGBO_WEB':ENDPOINTS['web']['pingbo']['base_url'],
+ 'PINGBO_ORIGIN':ENDPOINTS['apis']['pingbo']['base_url'],
 }
-ALLOW={
- 'api.738z3.com':{'/v1/match/getList','/v1/match/getMatchDetail'},
- 'api.r4bud5u7.com':{'/yewu11/v1/m/matchesPagePB','/yewu11/v1/m/matchDetail/getMatchOddsInfoPB'},
- 'www.pin135.com':{'/sports-service/sv/compact/events'},
-}
+PINGBO_HOSTS=set(ENDPOINTS['apis']['pingbo']['hosts'])
+ALLOW={}
+for api in ENDPOINTS['apis'].values():
+ for host in api.get('hosts',[]):
+  ALLOW[host]=set(api.get('read_paths',[]))
 
 def now(): return datetime.now(timezone.utc).isoformat(timespec='milliseconds')
 def headers_env(name):
@@ -59,7 +60,7 @@ def request_json(ctx,url,method,headers,params=None,body=None,timeout_ms=15000):
  if method=='GET': r=ctx.request.get(url,headers=headers,timeout=timeout_ms)
  else: r=ctx.request.post(url,headers=headers,data=body or {},timeout=timeout_ms)
  if r.status in (401,403):
-  site='pingbo' if p.netloc=='www.pin135.com' else 'op7'
+  site='pingbo' if p.netloc in PINGBO_HOSTS else 'op7'
   raise AuthenticationRequired(site,r.status,f'{p.netloc}{p.path}')
  if not r.ok: raise RuntimeError(f'HTTP {r.status} from {p.netloc}{p.path}')
  return unwrap(r.json())
@@ -103,7 +104,7 @@ def save_failure(out,name,error):
  (out/(name+'_status.json')).write_text(json.dumps({'status':status,'failed_at_utc':now(),'error_type':type(error).__name__,'error':str(error)},ensure_ascii=False,indent=2),encoding='utf-8')
 
 def setup_session(site,profiles_dir):
- sites={'op7':('https://op7.io/zh/','OP7'),'pingbo':('https://www.pin135.com/','Pingbo')}
+ sites={'op7':(SITES['OP7_WEB'],'OP7'),'pingbo':(SITES['PINGBO_WEB'],'Pingbo')}
  targets=list(sites) if site=='both' else [site]
  with sync_playwright() as p:
   for key in targets:
@@ -118,7 +119,9 @@ def setup_session(site,profiles_dir):
     input(f'请确认 {label} 已成功登录并进入正常业务页面，然后回到终端按 Enter 保存本地会话；若未成功登录请不要按 Enter：')
     cookies=ctx.cookies()
     domains=[c.get('domain','') for c in cookies]
-    relevant=[d for d in domains if ('op7.io' in d or '738z3.com' in d or 'r4bud5u7.com' in d)] if key=='op7' else [d for d in domains if ('pin135.com' in d)]
+    op_hosts=set(ENDPOINTS['web']['op7']['hosts']) | set(ENDPOINTS['apis']['fb']['hosts']) | set(ENDPOINTS['apis']['eb']['hosts']) | set(ENDPOINTS['apis']['common']['hosts'])
+    pb_hosts=set(ENDPOINTS['web']['pingbo']['hosts']) | set(ENDPOINTS['apis']['pingbo']['hosts'])
+    relevant=[d for d in domains if any(h.lstrip('.') in d.lstrip('.') for h in op_hosts)] if key=='op7' else [d for d in domains if any(h.lstrip('.') in d.lstrip('.') for h in pb_hosts)]
     print(f'{label}：浏览器配置已保存在 {profile}。当前 Cookie 数量 {len(cookies)}，相关域 Cookie 数量 {len(relevant)}。')
     if not relevant:
      print('警告：未发现相关域 Cookie；若站点使用其他存储方式，会话仍可能已保存。请用后台刷新验证，若返回 401/403 请重新登录。')
