@@ -51,6 +51,9 @@ EB_PATHS = {
     "/yewu11/v1/m/matchDetail/getMatchDetailPB",
     "/yewu11/v1/m/getMatchBaseInfoByMidsPB",
     "/yewu11/v1/m/noLiveMatchesPagePB",
+    "/yewu13/v1/betOrder/client/queryLatestMarketInfo",
+    "/yewu13/v1/betOrder/client/queryMarketMaxMinBetMoney",
+    "/yewu13/v1/betOrder/client/bet",
 }
 COMMON_PATHS = {
     "/api/match/sport/listbytype",
@@ -65,7 +68,7 @@ def capture_browser_request(request) -> None:
         u = urlsplit(request.url)
         if u.path in PINGBO_PATHS:
             family = "pingbo"
-        elif u.path in EB_PATHS:
+        elif u.path in EB_PATHS or u.path.startswith("/yewu13/v1/betOrder/"):
             family = "eb"
         elif u.path in COMMON_PATHS:
             family = "common"
@@ -83,6 +86,22 @@ def capture_browser_request(request) -> None:
             "url": request.url,
             "post_data": request.post_data,
         }
+        if u.path == EB_BET_PATH and request.method.upper() == "POST":
+            try:
+                body = request.post_data_json
+            except Exception:
+                body = None
+            if isinstance(body, dict):
+                referer = request.headers.get("referer", "")
+                ref = urlsplit(referer)
+                FIRST_BET_CAPTURE["request_template"] = body
+                FIRST_BET_CAPTURE["request_origin"] = f"{u.scheme}://{u.netloc}"
+                FIRST_BET_CAPTURE["page_origin"] = f"{ref.scheme}://{ref.netloc}" if ref.scheme and ref.netloc else None
+                FIRST_BET_CAPTURE["request_headers"] = {
+                    k: v for k, v in request.headers.items()
+                    if k.lower() not in {"cookie", "host", "content-length", "connection", "accept-encoding", "transfer-encoding"}
+                    and not k.lower().startswith("sec-")
+                }
     except Exception:
         return
 
@@ -145,6 +164,9 @@ def confirm_first_bet_initialization() -> dict:
         "source": "manual_browser_first_bet_confirmation",
         "endpoint_host": captured.get("host"),
         "endpoint_path": captured.get("path"),
+        "browser_page_origin": captured.get("page_origin"),
+        "bet_api_origin": captured.get("request_origin") or (f"https://{captured.get('host')}" if captured.get("host") else None),
+        "request_template_captured": isinstance(captured.get("request_template"), dict),
         "http_status": captured.get("http_status"),
         "business_code": captured.get("business_code"),
         "order_numbers": list(dict.fromkeys((existing.get("order_numbers") or []) + order_numbers)),
@@ -154,6 +176,25 @@ def confirm_first_bet_initialization() -> dict:
     tmp = FIRST_BET_AUDIT_FILE.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(audit, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     tmp.replace(FIRST_BET_AUDIT_FILE)
+    # Persist only non-secret origins and audit metadata. Request headers/body
+    # remain memory-only and are never written to disk.
+    cfg = load_endpoints()
+    api_origin = captured.get("request_origin") or (f"https://{captured.get('host')}" if captured.get("host") else None)
+    page_origin = captured.get("page_origin")
+    if api_origin:
+        cfg["apis"]["eb"]["base_url"] = api_origin
+        cfg["apis"]["eb"]["nba_read_base_url"] = api_origin
+        api_host = urlsplit(api_origin).hostname
+        cfg["apis"]["eb"]["hosts"] = list(dict.fromkeys((cfg["apis"]["eb"].get("hosts") or []) + [api_host]))
+    cfg.setdefault("runtime_discovery", {})
+    cfg["runtime_discovery"]["first_bet_initialization"] = {
+        "updated_at_utc": utc_now(),
+        "browser_page_origin": page_origin,
+        "eb_bet_api_origin": api_origin,
+        "bet_path": EB_BET_PATH,
+        "source": "successful manually placed first-bet request/response",
+    }
+    save_endpoints(cfg)
     return audit
 
 
