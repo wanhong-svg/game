@@ -20,9 +20,25 @@
     "Pingbo_event_list_and_embedded_odds": "active cluster median gap 20.9s; later long gaps likely page inactivity/navigation"
   },
   "network_allowlist": {
-    "api.738z3.com": ["/v1/match/getList", "/v1/match/getMatchDetail"],
-    "api.r4bud5u7.com": ["/yewu11/v1/m/matchesPagePB", "/yewu11/v1/m/matchDetail/getMatchOddsInfoPB"],
-    "www.part567.com": ["/sports-service/sv/compact/events"]
+    "api.738z3.com": [
+      "/v1/match/getList",
+      "/v1/match/getMatchDetail"
+    ],
+    "api.r4bud5u7.com": [
+      "/yewu11/v1/m/matchesPagePB",
+      "/yewu11/v1/m/matchDetail/getMatchOddsInfoPB"
+    ],
+    "www.pin135.com": [
+      "/sports-service/sv/compact/events"
+    ]
   },
-  "forbidden": ["bet submission", "order mutation", "wallet", "deposit", "withdrawal", "cashout", "account mutation"]
+  "forbidden": [
+    "bet submission",
+    "order mutation",
+    "wallet",
+    "deposit",
+    "withdrawal",
+    "cashout",
+    "account mutation"
+  ]
 }
