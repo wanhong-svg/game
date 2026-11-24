@@ -202,7 +202,7 @@ def fetch_nba_details(context, origin: str, referer: str, captured_headers: dict
         "_": int(time.time() * 1000),
     }
     list_data = api_get(context, origin, "/sports-service/sv/mobile/odds-today",
-                        params, referer)
+                        params, referer, captured_headers)
     listed = extract_list_events(list_data)
     # Live NBA games are a separate captured list endpoint. Merge by event id.
     live_params = dict(params)
