@@ -6,6 +6,7 @@ on:
     branches:
       - main
       - fix/data-integrity-validation
+      - feature/h5-validation
 
 jobs:
   unittest:
