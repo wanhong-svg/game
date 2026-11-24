@@ -65,6 +65,11 @@ def event_identity(event: dict[str, Any], league: dict[str, Any] | None = None) 
         "away_team": away.get("name"),
         "away_team_en": away.get("englishName"),
         "start_time_ms": event.get("time"),
+        "raw_status": event.get("status") or event.get("matchStatus") or event.get("state"),
+        "is_live": event.get("isLive") if isinstance(event.get("isLive"), bool) else event.get("live") if isinstance(event.get("live"), bool) else None,
+        "phase_code": event.get("periodLabel") or event.get("periodName"),
+        "period_label": event.get("periodLabel") or event.get("periodName"),
+        "clock_seconds": event.get("clockSeconds") or event.get("elapsedSeconds") or event.get("remainingSeconds"),
         "sport_id": str((league or {}).get("sportId") or event.get("sportId") or SPORT_ID_BASKETBALL),
     }
 
