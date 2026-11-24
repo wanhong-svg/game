@@ -238,17 +238,20 @@ def run_validation(eb_rows,pb,min_edge=None):
       "results":out,"safety":"只读校验，不含投注、订单、钱包或资金接口"}
 
 def markdown(r):
-    lines=["# EB Under × Pingbo NBA 反向大小分校验","",
-     f"时间：{r['generated_at_utc']}","",
-     f"通过 {r['summary']['rule_pass']} | 未通过 {r['summary']['rule_fail']} | 未匹配 {r['summary']['unmatched']}","",
-     "| EB赛事 | EB盘口 | EB赔率 | 平博反向盘口 | 平博赔率 | 合并概率 | Edge | 判断 |",
-     "|---|---:|---:|---:|---:|---:|---:|---|"]
+    lines=["# EB Under 入口 × Pingbo NBA 双向交叉赔率校验","",
+      f"时间：{r['generated_at_utc']}","",
+      f"候选A {r['summary']['candidate_a']} | 候选B {r['summary']['candidate_b']} | 双向异常 {r['summary']['anomalies']} | 无匹配 {r['summary']['no_match']} | 未确认赛事/进程 {r['summary']['unmatched']}","",
+      "| EB赛事 | EB小分线/赔率 | Pingbo大分线/赔率 | A倒数和 | B倒数和 | 结果 |",
+      "|---|---:|---:|---:|---:|---|"]
     for x in r["results"]:
-        c=x.get("calculation") or {}
-        lines.append(f"| {x.get('home_team')} vs {x.get('away_team')} | 小 {x.get('points')} | {x.get('odds_decimal')} | {'大 '+str(x.get('pingbo_points') or x.get('points')) if x.get('pingbo_odds_decimal') else '—'} | {x.get('pingbo_odds_decimal','—')} | {c.get('combined_implied_probability','—')} | {c.get('edge_percent','—')} | {x.get('rule_status')} |")
-    lines += ["","计算：Edge = 1 - (1 / EB Under十进制赔率 + 1 / 平博 Over十进制赔率)。Edge 大于配置阈值才通过。",
-      "这是两边赔率的理论套利筛查，不代表预测；程序不会自动投注。"]
-    return "\n".join(lines)
+        checks=x.get("cross_checks") or {}
+        ca=checks.get("A_pingbo_over_plus_eb_under") or {}
+        cb=checks.get("B_pingbo_under_plus_eb_over") or {}
+        lines.append(f"| {x.get('home_team')} vs {x.get('away_team')} | 小 {x.get('points')} / {x.get('odds_decimal')} | 大 {x.get('pingbo_points','—')} / {ca.get('pingbo_odds_decimal','—')} | {ca.get('reciprocal_sum','—')} | {cb.get('reciprocal_sum','—')} | {x.get('rule_status')} |")
+    lines += ["","入口仅取 EB 全场小分；赛事双方球队按无序组合识别，开赛时间必须一致。滚球还要求双方提供相同的规范化节次与秒级进度字段；字段缺失或不一致时拒绝匹配。",
+      "盘口入口条件：EB Under line >= Pingbo Over line。交叉赔率：A=1/Pingbo Over + 1/EB Under；B=1/Pingbo Under + 1/EB Over；各自严格小于 1.0052。",
+      "仅一个方向成立才生成对应 EB 赔率候选；两个方向同时成立标记异常；均不成立不产生候选。程序只读，不执行投注。"]
+    return "\\n".join(lines)
 def main():
     p=argparse.ArgumentParser()
     p.add_argument("--snapshots",default="live_snapshots"); p.add_argument("--out",default="eb_pingbo_nba_validation.json")
