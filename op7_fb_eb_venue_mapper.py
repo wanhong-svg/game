@@ -12,7 +12,11 @@ from decimal import Decimal, InvalidOperation, ROUND_DOWN
 from pathlib import Path
 from urllib.parse import urlsplit, parse_qs
 
-FB_HOST='api.738z3.com'; EB_HOST='api.r4bud5u7.com'; COMMON_HOST='api.live336.com'; PB_HOSTS={'www.part567.com', 'www.pin135.com'}
+ENDPOINTS = json.loads((Path(__file__).with_name('endpoints.json')).read_text(encoding='utf-8'))
+FB_HOSTS = set(ENDPOINTS['apis']['fb']['hosts'])
+EB_HOSTS = set(ENDPOINTS['apis']['eb']['hosts'])
+COMMON_HOSTS = set(ENDPOINTS['apis']['common']['hosts'])
+PB_HOSTS = set(ENDPOINTS['apis']['pingbo']['hosts'])
 FB_MATCH_STATUS={0:'已结束',1:'推迟（较长）',2:'中断',3:'取消',4:'未开赛',5:'进行中',6:'延迟（较短）',7:'废弃',8:'暂停'}
 FB_PHASE={1001:'即将开始',1002:'上半场',1003:'中场休息',1004:'下半场',1005:'全场结束',1006:'加时上半场',1008:'加时下半场',1011:'全场结束',1014:'点球结束',1015:'中断',1016:'废弃/放弃'}
 EB_PHASE={0:'即将开始',6:'上半场',31:'中场休息',302:'半场',7:'下半场',41:'加时上半场',42:'加时下半场',80:'中断',90:'废弃/放弃',100:'全场结束',999:'全场结束',120:'点球结束'}
@@ -51,9 +55,9 @@ def decode_response(entry):
 
 def identify_venue(url):
     p=urlsplit(url); h=p.netloc.lower(); path=p.path; q=parse_qs(p.query)
-    if h==FB_HOST and path.startswith('/v1/match/'): return 'FB'
-    if h==EB_HOST and path.startswith('/yewu11/v1/') and any(x in path for x in ('matchesPagePB','getMatchOddsInfoPB','getMatchDetailPB','getMatchBaseInfoByMidsPB','esportsMatchesPB','noLiveMatchesPagePB','getFilterMatchListPB')): return 'EB'
-    if h==COMMON_HOST:
+    if h in FB_HOSTS and path in ENDPOINTS['apis']['fb']['read_paths']: return 'FB'
+    if h in EB_HOSTS and (path in ENDPOINTS['apis']['eb']['read_paths'] or path in ENDPOINTS['apis']['eb']['bet_paths']): return 'EB'
+    if h in COMMON_HOSTS:
         gt=(q.get('gameType') or [''])[0].upper()
         if gt=='FB': return 'FB'
         if gt=='OB': return 'EB'
