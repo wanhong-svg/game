@@ -202,7 +202,9 @@ def main():
      try:
       pb_params=dict(pb_q); pb_params.setdefault('_',str(int(time.time()*1000)))
       res=request_json(pbctx,SITES['PINGBO_ORIGIN']+'/sports-service/sv/compact/events','GET',ph,params=pb_params,timeout_ms=a.timeout*1000)
+      fetched_at=now()
       pb_list=mapper.extract_pingbo_events(res)
+      for event in pb_list: event['observed_at_utc']=fetched_at
       normalized=[{k:v for k,v in x.items() if not k.startswith('_')} for x in pb_list]
       pb_markets=[r for x in pb_list for r in mapper.flatten_pingbo_markets(x)]
       save_latest(out,'Pingbo_events',{'events':normalized,'markets':pb_markets}); clocks['pb']=time.monotonic()
@@ -224,7 +226,11 @@ def main():
       except Exception as e:
        failed_events+=1; print(f"FB赛事{ev.get('id')}盘口刷新失败：{type(e).__name__}",file=sys.stderr)
        if isinstance(e,AuthenticationRequired): auth_failure=e; break
-     save_latest(out,'FB_markets',rows,'PARTIAL' if failed_events else 'SUCCESS',{'failed_events':failed_events}); clocks['fb_odds']=time.monotonic()
+     if auth_failure:
+      save_failure(out,'FB_markets',auth_failure)
+     else:
+      save_latest(out,'FB_markets',rows,'PARTIAL' if failed_events else 'SUCCESS',{'failed_events':failed_events})
+     clocks['fb_odds']=time.monotonic()
      print(f'[{now()}] FB盘口刷新：{len(rows)}组盘口')
     if auth_failure: report_auth_failure(auth_failure,a); break
     # EB event odds
@@ -239,8 +245,13 @@ def main():
       except Exception as e:
        failed_events+=1; print(f"EB赛事{ev.get('id')}盘口刷新失败：{type(e).__name__}",file=sys.stderr)
        if isinstance(e,AuthenticationRequired): auth_failure=e; break
-     for row in rows: row['observed_at_utc']=now()
-     save_latest(out,'EB_markets',rows,'PARTIAL' if failed_events else 'SUCCESS',{'failed_events':failed_events}); clocks['eb_odds']=time.monotonic()
+     observed_at=now()
+     for row in rows: row['observed_at_utc']=observed_at
+     if auth_failure:
+      save_failure(out,'EB_markets',auth_failure)
+     else:
+      save_latest(out,'EB_markets',rows,'PARTIAL' if failed_events else 'SUCCESS',{'failed_events':failed_events})
+     clocks['eb_odds']=time.monotonic()
      print(f'[{now()}] EB盘口刷新：{len(rows)}组盘口')
     if auth_failure: report_auth_failure(auth_failure,a); break
     time.sleep(0.5)
