@@ -11,9 +11,8 @@ import urllib.request
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
-LATEST_PATH = "/yewu13/v1/betOrder/client/queryLatestMarketInfo"
-LIMIT_PATH = "/yewu13/v1/betOrder/client/queryMarketMaxMinBetMoney"
-BET_PATH = "/yewu13/v1/betOrder/client/bet"
+ENDPOINTS = json.loads((Path(__file__).with_name("endpoints.json")).read_text(encoding="utf-8"))
+LATEST_PATH, LIMIT_PATH, BET_PATH = ENDPOINTS["apis"]["eb"]["bet_paths"]
 
 
 def as_decimal(value):
@@ -143,7 +142,7 @@ def require_success(response, endpoint):
 
 
 def submit_test_bet(selection, stake, timeout=15):
-    base_url = validate_test_target(os.environ.get("OP7_TEST_BET_BASE_URL", ""))
+    base_url = validate_test_target(os.environ.get("OP7_TEST_BET_BASE_URL", ENDPOINTS["apis"]["eb"]["base_url"]))
     headers = _headers()
     latest_response = post_json(base_url, LATEST_PATH, build_latest_market_request(selection), headers, timeout)
     latest_rows = require_success(latest_response, LATEST_PATH)
