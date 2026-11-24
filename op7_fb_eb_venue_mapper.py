@@ -12,7 +12,7 @@ from decimal import Decimal, InvalidOperation, ROUND_DOWN
 from pathlib import Path
 from urllib.parse import urlsplit, parse_qs
 
-FB_HOST='api.738z3.com'; EB_HOST='api.r4bud5u7.com'; COMMON_HOST='api.live336.com'; PB_HOST='www.part567.com'
+FB_HOST='api.738z3.com'; EB_HOST='api.r4bud5u7.com'; COMMON_HOST='api.live336.com'; PB_HOSTS={'www.part567.com', 'www.pin135.com'}
 FB_MATCH_STATUS={0:'已结束',1:'推迟（较长）',2:'中断',3:'取消',4:'未开赛',5:'进行中',6:'延迟（较短）',7:'废弃',8:'暂停'}
 FB_PHASE={1001:'即将开始',1002:'上半场',1003:'中场休息',1004:'下半场',1005:'全场结束',1006:'加时上半场',1008:'加时下半场',1011:'全场结束',1014:'点球结束',1015:'中断',1016:'废弃/放弃'}
 EB_PHASE={0:'即将开始',6:'上半场',31:'中场休息',302:'半场',7:'下半场',41:'加时上半场',42:'加时下半场',80:'中断',90:'废弃/放弃',100:'全场结束',999:'全场结束',120:'点球结束'}
@@ -57,7 +57,7 @@ def identify_venue(url):
         gt=(q.get('gameType') or [''])[0].upper()
         if gt=='FB': return 'FB'
         if gt=='OB': return 'EB'
-    if h==PB_HOST and path.startswith('/sports-service/sv/compact/'): return 'PINGBO'
+    if h in PB_HOSTS and path.startswith('/sports-service/sv/compact/'): return 'PINGBO'
     return None
 
 def walk(x):
@@ -205,7 +205,7 @@ def flatten_pingbo_markets(event):
             if odds is None or odds<=1: continue
             rows.append({'venue':'PINGBO','event_id':event['event_id'],'market_key':'0','market_label':'抓包结构key=0（历史脚本按让球解析）',
               'side':side,'line':r[line_idx],'signed_line':r[idx],'decimal_odds':str(odds),'display_europe':trunc(odds,2),
-              'selection_id':r[7] if len(r)>7 else None,'raw_status_fields':r[5:7]})
+              'selection_id':r[7] if len(r)>7 else None,'raw_status_fields':r[5:7],\n              'observed_at_utc':event.get('observed_at_utc')})
     for r in markets.get('1',[]) if isinstance(markets,dict) else []:
         if not isinstance(r,list) or len(r)<4: continue
         line=r[0]; total=dec(r[1]); over=dec(r[2]); under=dec(r[3])
@@ -214,7 +214,7 @@ def flatten_pingbo_markets(event):
             if odds is None or odds<=1: continue
             rows.append({'venue':'PINGBO','event_id':event['event_id'],'market_key':'1','market_label':'抓包结构key=1（历史脚本按大小球解析）',
               'side':side,'line':line,'line_numeric_source_index_1':str(total) if total is not None else None,
-              'decimal_odds':str(odds),'display_europe':trunc(odds,2),'selection_id':r[4] if len(r)>4 else None})
+              'decimal_odds':str(odds),'display_europe':trunc(odds,2),'selection_id':r[4] if len(r)>4 else None,'observed_at_utc':event.get('observed_at_utc')})
     return rows
 
 def dedupe_markets(rows):
