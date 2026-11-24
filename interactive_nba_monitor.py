@@ -30,7 +30,10 @@ ROOT = Path(__file__).resolve().parent
 ENDPOINTS_FILE = ROOT / "endpoints.json"
 PROFILE_DIR = ROOT / "browser_profiles" / "pingbo"
 SNAPSHOT_DIR = ROOT / "live_snapshots"
+FIRST_BET_AUDIT_FILE = ROOT / "first_bet_initialization.json"
 POLL_SECONDS = 20
+EB_BET_PATH = "/yewu13/v1/betOrder/client/bet"
+FIRST_BET_CAPTURE: dict = {}
 PINGBO_PATHS = {
     "/sports-service/sv/mobile/sports",
     "/sports-service/sv/mobile/leagues",
@@ -82,6 +85,76 @@ def capture_browser_request(request) -> None:
         }
     except Exception:
         return
+
+
+def capture_browser_response(response) -> None:
+    """Capture the first-bet result without persisting request headers or credentials."""
+    try:
+        parsed = urlsplit(response.request.url)
+        if parsed.path != EB_BET_PATH:
+            return
+        payload = response.json()
+        data = payload.get("data") if isinstance(payload, dict) else None
+        details = data.get("orderDetailRespList") if isinstance(data, dict) else None
+        order_numbers = []
+        if isinstance(details, list):
+            order_numbers = [
+                str(item.get("orderNo")).strip()
+                for item in details
+                if isinstance(item, dict) and item.get("orderNo") is not None
+                and str(item.get("orderNo")).strip()
+            ]
+        FIRST_BET_CAPTURE.clear()
+        FIRST_BET_CAPTURE.update({
+            "captured_at_utc": utc_now(),
+            "host": parsed.hostname,
+            "path": parsed.path,
+            "http_status": response.status,
+            "business_code": str(payload.get("code") or "") if isinstance(payload, dict) else "",
+            "order_numbers": list(dict.fromkeys(order_numbers)),
+            "response_ok": bool(response.ok),
+        })
+    except Exception:
+        FIRST_BET_CAPTURE.clear()
+
+
+def confirm_first_bet_initialization() -> dict:
+    """Require a successful response and at least one non-empty orderNo."""
+    captured = dict(FIRST_BET_CAPTURE)
+    if not captured:
+        raise RuntimeError("尚未捕获 EB 首单投注响应；请先在浏览器完成一笔投注。")
+    if not captured.get("response_ok") or captured.get("http_status") != 200:
+        raise RuntimeError("首单投注 HTTP 响应未成功，不能初始化。")
+    if captured.get("business_code") != "0000000":
+        raise RuntimeError("首单投注业务返回码不是 0000000，不能初始化。")
+    order_numbers = captured.get("order_numbers") or []
+    if not order_numbers:
+        raise RuntimeError("首单响应 data.orderDetailRespList 中没有非空 orderNo，不能初始化。")
+
+    existing = {}
+    if FIRST_BET_AUDIT_FILE.exists():
+        try:
+            existing = json.loads(FIRST_BET_AUDIT_FILE.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            existing = {}
+    recorded = set(existing.get("order_numbers") or [])
+    new_numbers = [number for number in order_numbers if number not in recorded]
+    audit = {
+        "initialized": True,
+        "initialized_at_utc": utc_now(),
+        "source": "manual_browser_first_bet_confirmation",
+        "endpoint_host": captured.get("host"),
+        "endpoint_path": captured.get("path"),
+        "http_status": captured.get("http_status"),
+        "business_code": captured.get("business_code"),
+        "order_numbers": list(dict.fromkeys((existing.get("order_numbers") or []) + order_numbers)),
+        "new_order_numbers": new_numbers,
+        "duplicate_order_numbers": [number for number in order_numbers if number in recorded],
+    }
+    tmp = FIRST_BET_AUDIT_FILE.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(audit, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    tmp.replace(FIRST_BET_AUDIT_FILE)
+    return audit
 
 
 def utc_now() -> str:
@@ -350,6 +423,7 @@ def main():
     )
     page = current_visible_page(context)
     page.on("request", capture_browser_request)
+    page.on("response", capture_browser_response)
     commands = queue.Queue()
 
     def read_commands():
@@ -367,12 +441,18 @@ def main():
     try:
         try:
             if not page.url or page.url == "about:blank":
-                page.goto("https://www.pin135.com/", wait_until="domcontentloaded", timeout=30000)
+                target_url = input("请输入 EB 模拟环境页面地址（HTTPS）：").strip()
+                parsed_target = urlsplit(target_url)
+                if parsed_target.scheme != "https" or not parsed_target.hostname:
+                    raise ValueError("必须输入有效的 HTTPS 模拟环境地址。")
+                page.goto(target_url, wait_until="domcontentloaded", timeout=30000)
         except PlaywrightTimeoutError:
             print("浏览器页面加载等待超时；请检查页面后继续。")
         print(f"浏览器已启动，当前页面：{page.url}")
-        print("如未登录，请先在浏览器完成登录并进入篮球赛事列表；然后在终端输入“开始”。")
+        print("请在浏览器人工登录并进入 EB 页面；开始监听后完成一笔首单模拟投注。")
         running = False
+        awaiting_first_bet = False
+        first_bet_initialized = False
         next_scan = 0.0
         while True:
             try:
@@ -382,10 +462,30 @@ def main():
             if command in {"开始", "start", "START"}:
                 if running:
                     print("监控已经在运行。")
+                elif not first_bet_initialized:
+                    awaiting_first_bet = True
+                    print("首单初始化阶段：请在 EB 浏览器人工完成一笔模拟投注。")
+                    print("完成后输入“是”确认；尚未完成请输入“否”。")
                 else:
                     running = True
                     next_scan = 0.0
-                    print("已开始实时检索。浏览器不会跳转；输入“结束”停止。")
+                    print("首单已初始化，正式盘口识别开始。")
+            elif awaiting_first_bet and command in {"是", "yes", "YES"}:
+                try:
+                    audit = confirm_first_bet_initialization()
+                    first_bet_initialized = True
+                    awaiting_first_bet = False
+                    running = True
+                    next_scan = 0.0
+                    print("首单初始化通过：响应业务码 0000000，orderNo 非空。")
+                    print(f"首单 orderNo：{', '.join(audit['new_order_numbers'] or audit['order_numbers'])}")
+                    print(f"首单审计已保存：{FIRST_BET_AUDIT_FILE}")
+                    print("正式盘口识别与赔率比较开始。")
+                except Exception as exc:
+                    print(f"首单初始化未通过：{exc}")
+                    print("请完成首单投注并确认浏览器已收到成功响应后，再输入“是”。")
+            elif awaiting_first_bet and command in {"否", "no", "NO"}:
+                print("继续等待首单投注；完成后输入“是”确认。")
             elif command in {"结束", "停止", "stop", "STOP"}:
                 running = False
                 print("监控已结束；浏览器仍保持打开。")
@@ -393,7 +493,7 @@ def main():
                 print("正在退出监控程序。")
                 break
             elif command is not None:
-                print("无法识别命令，请输入：开始、结束或退出")
+                print("无法识别命令，请输入：开始、是、否、结束或退出")
 
             if running and time.monotonic() >= next_scan:
                 try:
