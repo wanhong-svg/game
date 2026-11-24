@@ -1,0 +1,93 @@
+{
+  "version": 1,
+  "web": {
+    "op7": {
+      "base_url": "https://op7-spa-testing.test800.xyz/",
+      "hosts": [
+        "op7-spa-testing.test800.xyz"
+      ]
+    },
+    "pingbo": {
+      "base_url": "https://www.part567.com/",
+      "hosts": [
+        "www.part567.com",
+        "www.pin135.com"
+      ]
+    }
+  },
+  "apis": {
+    "fb": {
+      "base_url": "https://api.738z3.com",
+      "hosts": [
+        "api.738z3.com"
+      ],
+      "read_paths": [
+        "/v1/match/getList",
+        "/v1/match/getMatchDetail"
+      ],
+      "bet_paths": []
+    },
+    "eb": {
+      "base_url": "https://api.dbsportxxx278gwf4.com",
+      "hosts": [
+        "api.dbsportxxx278gwf4.com",
+        "api.r4bud5u7.com"
+      ],
+      "read_paths": [
+        "/yewu11/v1/m/matchesPagePB",
+        "/yewu11/v1/m/matchDetail/getMatchOddsInfoPB",
+        "/yewu11/v1/m/matchDetail/getMatchDetailPB",
+        "/yewu11/v1/m/matchDetail/getESMatchDetailPB",
+        "/yewu11/v1/m/matchDetail/getESMatchOddsInfoPB",
+        "/yewu11/v1/m/getMatchBaseInfoByMidsPB",
+        "/yewu11/v1/m/esportsMatchesPB",
+        "/yewu11/v1/w/category/getCategoryList"
+      ],
+      "bet_paths": [
+        "/yewu13/v1/betOrder/client/queryLatestMarketInfo",
+        "/yewu13/v1/betOrder/client/queryMarketMaxMinBetMoney",
+        "/yewu13/v1/betOrder/client/bet"
+      ]
+    },
+    "common": {
+      "base_url": "https://api.live336.com",
+      "hosts": [
+        "api.live336.com"
+      ],
+      "read_paths": [
+        "/api/match/sport/listbytype",
+        "/api/popularEventsLive",
+        "/api/match/live/get100Refactoring",
+        "/api/match/live/check/winner"
+      ],
+      "game_type_map": {
+        "FB": "FB",
+        "OB": "EB"
+      }
+    },
+    "pingbo": {
+      "base_url": "https://www.part567.com",
+      "hosts": [
+        "www.part567.com",
+        "www.pin135.com"
+      ],
+      "read_paths": [
+        "/sports-service/sv/compact/events"
+      ],
+      "auxiliary_paths": [
+        "/sports-service/sv/compact/carousels",
+        "/sports-service/sv/compact/sports-markets",
+        "/sports-service/sv/compact/leagues"
+      ]
+    }
+  },
+  "test_bet": {
+    "enabled_by_default": false,
+    "default_allowed_hosts": [
+      "localhost",
+      "127.0.0.1",
+      "::1"
+    ],
+    "note": "External test hosts must be added explicitly to OP7_TEST_BET_ALLOWED_HOSTS after verifying they are not production."
+  }
+}
