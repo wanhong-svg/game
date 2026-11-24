@@ -137,7 +137,7 @@ def discover_api_origins(page) -> dict[str, str]:
     return changed
 
 
-def api_get(context, origin: str, path: str, params: dict, referer: str, timeout_ms: int = 15000):
+def api_get(context, origin: str, path: str, params: dict, referer: str, captured_headers: dict[str, str] | None = None, timeout_ms: int = 15000):
     if path not in PINGBO_PATHS:
         raise ValueError(f"拒绝调用未在 HAR 白名单中的接口：{path}")
     response = context.request.get(
@@ -170,7 +170,7 @@ def extract_list_events(data):
     return rows
 
 
-def fetch_nba_details(context, origin: str, referer: str) -> dict:
+def fetch_nba_details(context, origin: str, referer: str, captured_headers: dict[str, str] | None = None) -> dict:
     common = {"locale": "zh_CN", "withCredentials": "true"}
     params = {
         **common, "sportId": 4, "periodNumber": 0, "periodNumbers": -1,
@@ -185,7 +185,7 @@ def fetch_nba_details(context, origin: str, referer: str) -> dict:
     live_params["_"] = int(time.time() * 1000)
     try:
         live_data = api_get(context, origin, "/sports-service/sv/mobile/odds-live",
-                             live_params, referer)
+                             live_params, referer, captured_headers)
         known = {str(ev.get("id")) for ev, _ in listed}
         for ev, league in extract_list_events(live_data):
             if str(ev.get("id")) not in known:
@@ -203,7 +203,7 @@ def fetch_nba_details(context, origin: str, referer: str) -> dict:
         }
         try:
             detail = api_get(context, origin, "/sports-service/sv/mobile/event",
-                             detail_params, referer)
+                             detail_params, referer, captured_headers)
             normal = detail.get("normal") if isinstance(detail, dict) else None
             source = "EVENT_DETAIL"
             if not isinstance(normal, dict):
@@ -372,7 +372,7 @@ def main():
                         raise RuntimeError(f"当前页面域名 {page_host} 未识别为 Pingbo；请先打开 Pingbo 赛事列表页")
                     if host not in pb_hosts:
                         raise RuntimeError(f"API域名 {host} 未通过抓包接口域名校验")
-                    pb = fetch_nba_details(context, origin, page_url)
+                    request_headers = CAPTURED_HEADERS.get("pingbo")\n                    if not request_headers:\n                        raise RuntimeError("尚未捕获到 Pingbo 列表接口请求头；请在浏览器刷新一次篮球赛事列表页，再输入“开始”。")\n                    pb = fetch_nba_details(context, origin, page_url, request_headers)
                     (ROOT / "pingbo_nba_live_details.json").write_text(
                         json.dumps(pb, ensure_ascii=False, indent=2), encoding="utf-8")
                     print_results(pb)
