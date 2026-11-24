@@ -65,6 +65,23 @@ class BasketballPolicyTests(unittest.TestCase):
         state, _ = freshness_state((now - timedelta(seconds=60)).isoformat(), 30, now)
         self.assertEqual(state, "STALE")
 
+    def test_empty_league_never_matches_whitelist(self):
+        from basketball_policy import classify_league
+        event = {"league": ""}
+        self.assertIsNone(classify_league(event, DEFAULT_CONFIG))
+
+    def test_unknown_pingbo_event_is_preserved_for_review(self):
+        cfg = json.loads(json.dumps(DEFAULT_CONFIG))
+        payload = {
+            "pingbo_events": [{"event_id": "p1", "home": "A", "away": "B", "observed_at_utc": "2026-11-24T12:00:00+00:00"}],
+            "pingbo_markets": [{"event_id": "p1", "market_key": "0", "side": "home", "signed_line": "-2.5", "decimal_odds": "1.91", "observed_at_utc": "2026-11-24T12:00:00+00:00"}]
+        }
+        rows = normalize_rows(payload, cfg)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["match_status"], "NEEDS_REVIEW")
+        self.assertEqual(rows[0]["sport_verification"], "UNVERIFIED")
+        self.assertEqual(rows[0]["odds_freshness"], "FRESH")
+
     def test_fb_market_requires_fulltime_phase(self):
         cfg = json.loads(json.dumps(DEFAULT_CONFIG))
         row = {"market_type_mty": 3002, "settlement_period_pe": 1002}
