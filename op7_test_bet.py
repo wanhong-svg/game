@@ -174,11 +174,16 @@ def submit_test_bet(selection, stake, timeout=15):
     amount = as_decimal(stake)
     if min_stake is None or amount is None or amount < min_stake:
         raise RuntimeError("stake is below the confirmed minimum; stopped before bet")
+    max_test_stake = as_decimal(os.environ.get("OP7_TEST_BET_MAX_STAKE", "10"))
+    if max_test_stake is None or amount > max_test_stake:
+        raise RuntimeError("stake exceeds OP7_TEST_BET_MAX_STAKE; stopped before bet")
 
     payload = build_bet_payload(selection, amount, odds_value=int(odds_value))
     bet_response = post_json(base_url, BET_PATH, payload, headers, timeout)
     bet_data = require_success(bet_response, BET_PATH)
     details = bet_data.get("orderDetailRespList", []) if isinstance(bet_data, dict) else []
+    if not details or any(x.get("orderStatusCode") not in (1, "1") for x in details):
+        raise RuntimeError("bet response did not confirm an accepted order; inspect the test environment manually")
     return {
         "code": bet_response.get("code"), "message": bet_response.get("msg"),
         "accepted_order_count": len(details),
