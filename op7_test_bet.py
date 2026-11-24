@@ -2,16 +2,20 @@
 # -*- coding: utf-8 -*-
 """Guarded local-test wager flow. Network submission is disabled by default."""
 import argparse
+import hashlib
 import ipaddress
+import time
 import json
 import os
 import urllib.error
 import urllib.parse
 import urllib.request
 from decimal import Decimal, InvalidOperation
+from datetime import datetime, timezone
 from pathlib import Path
 
 ENDPOINTS = json.loads((Path(__file__).with_name("endpoints.json")).read_text(encoding="utf-8"))
+ORDER_AUDIT_PATH = Path(__file__).with_name("bet_order_audit.json")
 LATEST_PATH, LIMIT_PATH, BET_PATH = ENDPOINTS["apis"]["eb"]["bet_paths"]
 
 
@@ -60,7 +64,7 @@ def build_bet_payload(selection, stake, odds_value=None):
     odds_decimal = Decimal(raw_odds) / Decimal(100000)
     detail = {
         "playId": str(market["hpid"]), "matchType": int(selection["match_type"]),
-        "marketTypeFinally": str(selection.get("market_type_finally", "EU")),
+        "marketTypeFinally": str(selection["market_type_finally"]),
         "playOptionsId": str(option["oid"]), "placeNum": int(selection["place_num"]),
         "betAmount": format(amount, "f"), "matchId": str(event["mid"]),
         "marketId": str(group["hid"]), "odds": raw_odds,
@@ -79,7 +83,154 @@ def build_bet_payload(selection, stake, odds_value=None):
     }
 
 
-def _allowed_test_host(host):
+
+def select_eb_full_game_total(event, line, side, *, match_type, place_num,
+                              cuid, device_imei, market_type_finally):
+    """Resolve a candidate against the current raw EB event tree; never reuse old IDs."""
+    if str(event.get("csid")) != "2":
+        raise ValueError("candidate event is not basketball (csid != 2)")
+    labels = {str(event.get(k) or "").strip().upper() for k in ("tn", "tnjc")}
+    labels.discard("")
+    if not labels or labels != {"NBA"}:
+        raise ValueError("candidate event is not an unambiguous regular NBA event")
+    if side not in {"Under", "Over"}:
+        raise ValueError("side must be Under or Over")
+    try:
+        target_line = Decimal(str(line))
+    except Exception:
+        raise ValueError("candidate line is invalid") from None
+    matches = []
+    for market in event.get("hps") or []:
+        if not isinstance(market, dict) or str(market.get("hpid")) != "38":
+            continue
+        for group in market.get("hl") or []:
+            if not isinstance(group, dict):
+                continue
+            try:
+                group_line = Decimal(str(group.get("hv")))
+            except Exception:
+                continue
+            if group_line != target_line:
+                continue
+            for option in group.get("ol") or []:
+                if isinstance(option, dict) and str(option.get("ot", "")).lower() == side.lower():
+                    matches.append((market, group, option))
+    if len(matches) != 1:
+        raise ValueError(f"EB full-game totals mapping is ambiguous: {len(matches)} matching {side} options")
+    market, group, option = matches[0]
+    required = {
+        "event.mid": event.get("mid"), "event.tid": event.get("tid"),
+        "event.csid": event.get("csid"), "event.csna": event.get("csna"),
+        "event.tn": event.get("tn"), "market.hpid": market.get("hpid"),
+        "market.hpn": market.get("hpn"), "group.hid": group.get("hid"),
+        "option.oid": option.get("oid"), "option.ot": option.get("ot"),
+        "option.ov": option.get("ov"), "option display": option.get("otv") or option.get("onb") or option.get("on"),
+        "cuid": cuid, "device_imei": device_imei, "market_type_finally": market_type_finally,
+    }
+    missing = [key for key, value in required.items() if value in (None, "")]
+    if missing:
+        raise ValueError("missing live EB bet fields: " + ", ".join(missing))
+    return {
+        "event": event, "market": market, "group": group, "option": option,
+        "match_type": int(match_type), "place_num": int(place_num),
+        "cuid": str(cuid), "device_imei": str(device_imei),
+        "market_type_finally": str(market_type_finally),
+    }
+
+
+def validate_cross_odds_snapshot(snapshot, threshold=Decimal("1.0052")):
+    """Apply the agreed A/B reciprocal-sum rule to one fresh two-book snapshot."""
+    required = ("eb_under", "eb_over", "pingbo_over", "pingbo_under",
+                "eb_under_line", "pingbo_over_line")
+    missing = [k for k in required if snapshot.get(k) in (None, "")]
+    if missing:
+        raise ValueError("fresh cross-odds snapshot missing: " + ", ".join(missing))
+    vals = {k: as_decimal(snapshot[k]) for k in required}
+    if any(vals[k] is None for k in required):
+        raise ValueError("fresh cross-odds snapshot contains invalid numeric values")
+    if any(vals[k] <= 1 for k in ("eb_under", "eb_over", "pingbo_over", "pingbo_under")):
+        raise ValueError("all four fresh odds must be greater than 1.00")
+    if vals["eb_under_line"] < vals["pingbo_over_line"]:
+        raise ValueError("EB Under line is below Pingbo Over line")
+    a = Decimal(1) / vals["pingbo_over"] + Decimal(1) / vals["eb_under"]
+    b = Decimal(1) / vals["pingbo_under"] + Decimal(1) / vals["eb_over"]
+    pass_a, pass_b = a < threshold, b < threshold
+    if pass_a == pass_b:
+        raise ValueError("cross-odds result is ambiguous or not profitable; no candidate")
+    return {
+        "direction": "Under" if pass_a else "Over",
+        "a_reciprocal_sum": str(a), "b_reciprocal_sum": str(b),
+        "a_pass": pass_a, "b_pass": pass_b, "threshold": str(threshold),
+    }
+
+
+def refresh_and_validate_cross_odds(refresh_both, max_seconds=5.0):
+    """Refresh both books within one five-second window; callback must return raw odds."""
+    started = time.monotonic()
+    snapshot = refresh_both()
+    elapsed = time.monotonic() - started
+    if elapsed > max_seconds:
+        raise RuntimeError(f"two-book odds refresh took {elapsed:.3f}s (> {max_seconds:.1f}s)")
+    result = validate_cross_odds_snapshot(snapshot)
+    result["refresh_elapsed_seconds"] = round(elapsed, 3)
+    result["snapshot"] = snapshot
+    return result
+
+
+def _candidate_key(selection):
+    event, market, group, option = (selection[k] for k in ("event", "market", "group", "option"))
+    raw = "|".join(str(x) for x in (
+        event.get("mid"), market.get("hpid"), group.get("hid"),
+        option.get("oid"), option.get("ot"), group.get("hv")
+    ))
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _write_order_audit(record):
+    current = {"version": 1, "records": []}
+    if ORDER_AUDIT_PATH.exists():
+        try:
+            current = json.loads(ORDER_AUDIT_PATH.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            raise RuntimeError("bet order audit file is unreadable; refusing to continue")
+    records = current.get("records")
+    if not isinstance(records, list):
+        raise RuntimeError("bet order audit file has invalid structure")
+    records.append(record)
+    temp = ORDER_AUDIT_PATH.with_suffix(".json.tmp")
+    temp.write_text(json.dumps(current, ensure_ascii=False, indent=2) + "\\n", encoding="utf-8")
+    temp.replace(ORDER_AUDIT_PATH)
+
+
+def parse_bet_result(response):
+    data = require_success(response, BET_PATH)
+    details = data.get("orderDetailRespList", []) if isinstance(data, dict) else []
+    if not details:
+        raise RuntimeError("bet response contains no orderDetailRespList")
+    orders = []
+    for item in details:
+        if not isinstance(item, dict) or item.get("orderStatusCode") not in (1, "1"):
+            raise RuntimeError("bet response contains an unaccepted order status")
+        order_no = str(item.get("orderNo") or "").strip()
+        if not order_no:
+            raise RuntimeError("accepted bet response is missing orderNo")
+        fen = as_decimal(item.get("betMoney"))
+        orders.append({
+            "orderNo": order_no,
+            "orderStatusCode": item.get("orderStatusCode"),
+            "bet_money_fen": str(fen) if fen is not None else None,
+            "bet_money_yuan": str(fen / Decimal(100)) if fen is not None else None,
+            "odds": item.get("oddsValues"),
+            "match": item.get("matchInfo"),
+        })
+    total_fen = as_decimal(data.get("betMoneyTotal")) if isinstance(data, dict) else None
+    return {
+        "orders": orders,
+        "bet_money_total_fen": str(total_fen) if total_fen is not None else None,
+        "bet_money_total_yuan": str(total_fen / Decimal(100)) if total_fen is not None else None,
+    }
+
+\ndef _allowed_test_host(host):
     host = host.lower().rstrip(".")
     explicit = {x.strip().lower().rstrip(".") for x in os.environ.get("OP7_TEST_BET_ALLOWED_HOSTS", "").split(",") if x.strip()}
     if host in explicit:
@@ -141,7 +292,7 @@ def require_success(response, endpoint):
     return response.get("data")
 
 
-def submit_test_bet(selection, stake, timeout=15):
+def submit_test_bet(selection, stake, timeout=15, cross_odds_refresh=None):
     base_url = validate_test_target(os.environ.get("OP7_TEST_BET_BASE_URL", ENDPOINTS["apis"]["eb"]["base_url"]))
     headers = _headers()
     latest_response = post_json(base_url, LATEST_PATH, build_latest_market_request(selection), headers, timeout)
@@ -173,22 +324,36 @@ def submit_test_bet(selection, stake, timeout=15):
     amount = as_decimal(stake)
     if min_stake is None or amount is None or amount < min_stake:
         raise RuntimeError("stake is below the confirmed minimum; stopped before bet")
-    max_test_stake = as_decimal(os.environ.get("OP7_TEST_BET_MAX_STAKE", "10"))
+    max_test_stake = as_decimal(os.environ.get("OP7_TEST_BET_MAX_STAKE", "11"))
     if max_test_stake is None or amount > max_test_stake:
         raise RuntimeError("stake exceeds OP7_TEST_BET_MAX_STAKE; stopped before bet")
 
     payload = build_bet_payload(selection, amount, odds_value=int(odds_value))
-    bet_response = post_json(base_url, BET_PATH, payload, headers, timeout)
-    bet_data = require_success(bet_response, BET_PATH)
-    details = bet_data.get("orderDetailRespList", []) if isinstance(bet_data, dict) else []
-    if not details or any(x.get("orderStatusCode") not in (1, "1") for x in details):
-        raise RuntimeError("bet response did not confirm an accepted order; inspect the test environment manually")
+    try:
+        bet_response = post_json(base_url, BET_PATH, payload, headers, timeout)
+        parsed_result = parse_bet_result(bet_response)
+    except Exception as exc:
+        # A timeout/error after POST is an unknown outcome. Never auto-retry.
+        _write_order_audit({
+            "candidate_key": key, "state": "UNKNOWN",
+            "updated_at_utc": datetime.now(timezone.utc).isoformat(),
+            "error_type": type(exc).__name__, "error": str(exc),
+        })
+        raise RuntimeError("bet POST outcome is uncertain; inspect the test account/order history before any retry") from None
+    _write_order_audit({
+        "candidate_key": key, "state": "ACCEPTED",
+        "updated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "orders": parsed_result["orders"],
+        "bet_money_total_fen": parsed_result["bet_money_total_fen"],
+        "bet_money_total_yuan": parsed_result["bet_money_total_yuan"],
+    })
     return {
         "code": bet_response.get("code"), "message": bet_response.get("msg"),
-        "accepted_order_count": len(details),
-        "order_status_codes": [x.get("orderStatusCode") for x in details],
+        "accepted_order_count": len(parsed_result["orders"]),
+        "orders": parsed_result["orders"],
+        "bet_money_total_yuan": parsed_result["bet_money_total_yuan"],
         "latest_odds": format(Decimal(int(odds_value)) / Decimal(100000), "f"),
-        "minimum_stake": str(min_stake)
+        "minimum_stake": str(min_stake), "audit_file": str(ORDER_AUDIT_PATH),
     }
 
 
