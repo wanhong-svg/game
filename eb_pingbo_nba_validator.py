@@ -86,8 +86,13 @@ def event_is_live(ev, venue):
         return True
     if status in {"scheduled","not_started","未开赛","即将开始","prematch"}:
         return False
-    phase=ev.get("phase_pe") if venue=="EB" else ev.get("phase_code")
+    phase=ev.get("phase_pe") or ev.get("phase_mmp") if venue=="EB" else ev.get("phase_code")
     if phase is None:
+        label=str(ev.get("period_label") or "").strip().lower()
+        if label in {"q1","q2","q3","q4","1st quarter","2nd quarter","3rd quarter","4th quarter","overtime","加时","第一节","第二节","第三节","第四节","中场","上半场","下半场"}:
+            return True
+        if label in {"not started","scheduled","未开赛","即将开始"}:
+            return False
         return None
     # EB phase values below are taken from the existing event phase mapping.
     if venue=="EB":
@@ -100,7 +105,7 @@ def event_is_live(ev, venue):
 def live_progress_signature(ev):
     # Only compare explicitly normalized fields; do not equate vendor-specific
     # numeric enums or guess the meaning of an undocumented clock field.
-    period=ev.get("period_label")
+    period=ev.get("period_label") or ev.get("phase_code")
     clock=ev.get("clock_seconds")
     if period in (None,"") or clock in (None,""):
         return None
