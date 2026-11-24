@@ -331,6 +331,8 @@ def submit_test_bet(selection, stake, timeout=15, cross_odds_refresh=None):
     amount = as_decimal(stake)
     if min_stake is None or amount is None or amount < min_stake:
         raise RuntimeError("stake is below the confirmed minimum; stopped before bet")
+    if amount != Decimal("11"):
+        raise RuntimeError("本流程固定每笔投注 11 元；金额不一致，已停止")
     max_test_stake = as_decimal(os.environ.get("OP7_TEST_BET_MAX_STAKE", "11"))
     if max_test_stake is None or amount > max_test_stake:
         raise RuntimeError("stake exceeds OP7_TEST_BET_MAX_STAKE; stopped before bet")
