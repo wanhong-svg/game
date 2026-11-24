@@ -53,7 +53,7 @@ COMMON_PATHS = {
     "/api/match/sport/listbytype",
     "/api/match/live/get100Refactoring",
 }
-CAPTURED_HEADERS: dict[str, dict[str, str]] = {}
+CAPTURED_HEADERS: dict[str, dict[str, str]] = {}\nCAPTURED_REQUESTS: dict[str, dict] = {}
 
 
 def capture_browser_request(request) -> None:
@@ -73,6 +73,11 @@ def capture_browser_request(request) -> None:
         CAPTURED_HEADERS[family] = {
             k: v for k, v in request.headers.items()
             if k.lower() not in blocked and not k.lower().startswith("sec-ch-")
+        }
+        CAPTURED_REQUESTS[u.path] = {
+            "method": request.method,
+            "url": request.url,
+            "post_data": request.post_data,
         }
     except Exception:
         return
@@ -168,9 +173,17 @@ def api_get(context, origin: str, path: str, params: dict, referer: str,
     headers.setdefault("Accept", "application/json, text/plain, */*")
     headers["Referer"] = referer
     headers.setdefault("Origin", f"{urlsplit(referer).scheme}://{urlsplit(referer).netloc}")
+    observed = CAPTURED_REQUESTS.get(path)
+    request_params = dict(params or {})
+    if observed:
+        observed_url = urlsplit(observed["url"])
+        observed_params = dict(__import__("urllib.parse", fromlist=["parse_qsl"]).parse_qsl(observed_url.query, keep_blank_values=True))
+        observed_params.update({k: str(v) for k, v in request_params.items()})
+        request_params = observed_params
+        origin = f"{observed_url.scheme}://{observed_url.netloc}"
     response = context.request.get(
         origin.rstrip("/") + path,
-        params=params,
+        params=request_params,
         headers=headers,
         timeout=timeout_ms,
     )
