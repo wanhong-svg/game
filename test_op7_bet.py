@@ -35,6 +35,10 @@ class BetPayloadTests(unittest.TestCase):
         self.assertEqual(detail["oddFinally"], "1.97")
         self.assertEqual(detail["betAmount"], "10")
 
+    def test_bet_payload_rejects_nonpositive_stake(self):
+        with self.assertRaises(ValueError):
+            build_bet_payload(SELECTION, "0")
+
     def test_target_is_blocked_without_explicit_switch(self):
         with patch.dict(os.environ, {"OP7_TEST_BET_ENABLED":"0"}, clear=False):
             with self.assertRaises(RuntimeError):
