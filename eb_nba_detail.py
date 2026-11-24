@@ -169,7 +169,7 @@ class EBClient:
         timeout: int = 15,
     ):
         self.base_url = (base_url or os.environ.get(
-            "EB_API_BASE_URL", EB_CONFIG["base_url"]
+            "EB_API_BASE_URL", EB_CONFIG.get("nba_read_base_url", EB_CONFIG["base_url"])
         )).rstrip("/")
         host = urllib.parse.urlsplit(self.base_url).hostname
         if urllib.parse.urlsplit(self.base_url).scheme != "https":
