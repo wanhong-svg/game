@@ -123,7 +123,6 @@ def capture_browser_response(response) -> None:
                 if isinstance(item, dict) and item.get("orderNo") is not None
                 and str(item.get("orderNo")).strip()
             ]
-        FIRST_BET_CAPTURE.clear()
         FIRST_BET_CAPTURE.update({
             "captured_at_utc": utc_now(),
             "host": parsed.hostname,
@@ -146,6 +145,10 @@ def confirm_first_bet_initialization() -> dict:
         raise RuntimeError("首单投注 HTTP 响应未成功，不能初始化。")
     if captured.get("business_code") != "0000000":
         raise RuntimeError("首单投注业务返回码不是 0000000，不能初始化。")
+    if not isinstance(captured.get("request_template"), dict):
+        raise RuntimeError("未捕获首单 POST 请求体，无法建立后续动态投注请求模板。")
+    if not captured.get("request_origin") or not captured.get("page_origin"):
+        raise RuntimeError("未能同时识别首单浏览器页面域名与投注 API 域名。")
     order_numbers = captured.get("order_numbers") or []
     if not order_numbers:
         raise RuntimeError("首单响应 data.orderDetailRespList 中没有非空 orderNo，不能初始化。")
