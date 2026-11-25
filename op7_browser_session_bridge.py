@@ -710,6 +710,36 @@ class BrowserSessionBridge:
 
         for event in events:
             add_field_names("event_field_names", event)
+
+            # Print identifying information from the already-captured list row
+            # before requesting detail, so a detail API error still identifies
+            # the fixture without relying on the detail response.
+            def first_text(*keys):
+                for key in keys:
+                    value = event.get(key)
+                    if value not in (None, "") and not isinstance(value, (dict, list)):
+                        return str(value).strip()
+                return ""
+
+            home_name = first_text("mhn", "homeName", "homeTeamName", "home", "hn")
+            away_name = first_text("man", "awayName", "awayTeamName", "away", "an")
+            league_name = first_text("tnjc", "tn", "leagueName", "league_name") or "NBA"
+            event_name = first_text("mn", "matchName", "match_name", "eventName", "event_name")
+            if not event_name and home_name and away_name:
+                event_name = f"{home_name} vs {away_name}"
+            if not event_name:
+                event_name = "赛事名称未在列表字段中提供"
+
+            print(
+                "[EB_NBA_EVENT]",
+                f"mid={event.get('mid') or '-'}",
+                f"league={league_name}",
+                f"event={event_name}",
+                f"home={home_name or '未提供'}",
+                f"away={away_name or '未提供'}",
+                flush=True,
+            )
+
             detail = self.fetch_match_detail(event)
             diagnostics["details_fetched"] += 1
             detail_data = detail.get("data") if isinstance(detail, dict) else None
