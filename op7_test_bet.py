@@ -499,7 +499,7 @@ def main():
                 output_path.parent.mkdir(parents=True, exist_ok=True)
                 temp_path = output_path.with_name(output_path.name + ".tmp")
                 temp_path.write_text(
-                    json.dumps(input_data, ensure_ascii=False, indent=2) + "\\n",
+                    json.dumps(input_data, ensure_ascii=False, indent=2) + "\n",
                     encoding="utf-8",
                 )
                 temp_path.replace(output_path)
