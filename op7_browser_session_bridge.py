@@ -10,7 +10,7 @@ import json
 import time
 from decimal import Decimal
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, parse_qsl, unquote
 
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 import op7_fb_eb_pingbo_live_refresh as live
@@ -220,12 +220,14 @@ class BrowserSessionBridge:
 
 
     def _capture_op7_response(self, response):
-        """Keep only in-memory parsed detail context; never print or persist identifiers."""
+        """Observe yewu11 JSON responses in memory; never persist request or response bodies."""
         try:
             parsed = urlsplit(response.url)
-            if not parsed.path.endswith("/yewu11/v1/w/matchDetail/getMatchDetailPB"):
+            if not parsed.path.startswith("/yewu11/v1/"):
                 return
-            query = dict(__import__("urllib.parse", fromlist=["parse_qsl"]).parse_qsl(parsed.query, keep_blank_values=True))
+            if not parsed.path.endswith("/getMatchDetailPB"):
+                return
+            query = dict(parse_qsl(parsed.query, keep_blank_values=True))
             request = response.request
             request_payload = {"url_params": query}
             raw_body = getattr(request, "post_data", None)
@@ -233,26 +235,64 @@ class BrowserSessionBridge:
                 try:
                     request_payload["body"] = json.loads(raw_body)
                 except Exception:
-                    request_payload["body"] = dict(__import__("urllib.parse", fromlist=["parse_qsl"]).parse_qsl(raw_body, keep_blank_values=True))
+                    request_payload["body"] = dict(parse_qsl(raw_body, keep_blank_values=True))
             payload = _decode_api_response(response.text())
             data = payload.get("data") if isinstance(payload, dict) else None
             mid = str(query.get("mid") or (request_payload.get("body") or {}).get("mid") or "")
             if not mid:
-                # Some deployments return the match id only in the decoded payload.
                 candidates = _walk_field_values(data, {"mid": {"mid"}})["mid"]
                 ids = {value for value, _ in candidates}
                 if len(ids) == 1:
                     mid = next(iter(ids))
-            if not mid:
-                return
-            self._detail_responses[mid] = {
-                "request": request_payload,
-                "response": payload,
-                "captured_at": time.time(),
-            }
+            if mid:
+                self._detail_responses[mid] = {
+                    "request": request_payload, "response": payload,
+                    "captured_at": time.time(),
+                }
         except Exception:
-            # A malformed/non-target response must not leak body or request metadata to logs.
             return
+
+    def fetch_match_detail(self, event):
+        """Build a detail request from the live yewu11 template and the discovered event mid."""
+        mid = str(event.get("mid") or "").strip()
+        if not mid:
+            raise RuntimeError("NBA 赛事列表记录缺少 mid，无法请求赛事详情")
+        path = "/yewu11/v1/w/matchDetail/getMatchDetailPB"
+        origin = live.CAPTURED_ORIGINS.get("eb")
+        if not origin:
+            raise RuntimeError("尚未捕获 OP7 yewu11 API 来源；请先加载 NBA 赛事列表")
+        response = live.request_json(
+            self.op7, origin + path, "GET",
+            live.headers_env("OP7_READONLY_HEADERS_JSON"),
+            params={"mid": mid}, timeout_ms=self.timeout * 1000, family="eb")
+        payload = _decode_api_response(response)
+        if not isinstance(payload, dict) or str(payload.get("code")) != "0000000":
+            code = payload.get("code") if isinstance(payload, dict) else "INVALID_RESPONSE"
+            raise RuntimeError(f"NBA 赛事 {mid} 详情接口返回异常状态 code={code}")
+        self._detail_responses[mid] = {
+            "request": {"url_params": {"mid": mid}},
+            "response": payload, "captured_at": time.time(),
+        }
+        return payload
+
+    @staticmethod
+    def _detail_market_lists(value):
+        """Find actual hps market arrays inside the decoded detail payload."""
+        found = []
+        seen = set()
+        def walk(node):
+            if isinstance(node, dict):
+                markets = node.get("hps")
+                if isinstance(markets, list) and id(markets) not in seen:
+                    seen.add(id(markets))
+                    found.extend(x for x in markets if isinstance(x, dict))
+                for child in node.values():
+                    walk(child)
+            elif isinstance(node, list):
+                for child in node:
+                    walk(child)
+        walk(value)
+        return found
 
     def runtime_context_for_event(self, event_id):
         record = self._detail_responses.get(str(event_id))
@@ -324,12 +364,20 @@ class BrowserSessionBridge:
         return list(rows_by_id.values())
 
     def discover_nba_total_selections(self):
-        """Build current full-game totals selections from live NBA event trees only."""
+        """Discover NBA events from yewu11 list API, then fetch each actual detail by mid."""
         events = self.discover_nba_events()
         selections = []
         for event in events:
-            for market in event.get("hps") or []:
-                if not isinstance(market, dict) or str(market.get("hpid")) != "38":
+            detail = self.fetch_match_detail(event)
+            detail_data = detail.get("data") if isinstance(detail, dict) else None
+            markets = self._detail_market_lists(detail_data)
+            if not markets:
+                raise RuntimeError(
+                    f"赛事 {event.get('mid')} 的 getMatchDetailPB 解密成功，但未找到 hps 盘口数组；"
+                    "请核对真实详情 JSON 结构"
+                )
+            for market in markets:
+                if str(market.get("hpid")) != "38":
                     continue
                 for group in market.get("hl") or []:
                     if not isinstance(group, dict) or group.get("hv") in (None, ""):
@@ -342,9 +390,13 @@ class BrowserSessionBridge:
                                     option.get("oid"), option.get("ov"))
                         if any(v in (None, "") for v in required):
                             continue
-                        selections.append({"event": event, "market": market, "group": group, "option": option})
+                        runtime_context = self.runtime_context_for_event(event["mid"])
+                        selections.append({
+                            "event": event, "market": market, "group": group,
+                            "option": option, "runtime_context": runtime_context,
+                        })
         if not selections:
-            raise RuntimeError("实时赛事列表中没有找到可确认 ID 的 NBA 正规赛事全场大小分选项")
+            raise RuntimeError("实时 NBA 详情接口中没有找到字段完整的全场大小分选项")
         return selections
 
     def post_json(self, base_url, path, body, headers, timeout=15):
