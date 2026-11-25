@@ -143,10 +143,10 @@ def _walk_field_values(value, aliases, found=None, path="$"):
     return found
 
 
-def _resolve_runtime_fields(sources, event_id):
+def _resolve_runtime_fields(sources, event_id, market=None, group=None):
     aliases = {
         "cuid": {"cuid"},
-        "device_imei": {"deviceimei", "deviceimei", "imei"},
+        "device_imei": {"deviceimei", "imei"},
         "match_type": {"matchtype"},
         "market_type_finally": {"markettypefinally"},
     }
@@ -154,7 +154,27 @@ def _resolve_runtime_fields(sources, event_id):
     for field in aliases:
         values = []
         for source_name, payload in sources:
-            found = _walk_field_values(payload, aliases)
+            scan_payload = payload
+            if field == "market_type_finally" and market is not None:
+                scoped = []
+                market_hpid = str(market.get("hpid") or "")
+                group_hid = str((group or {}).get("hid") or "")
+                def locate(node):
+                    if isinstance(node, dict):
+                        same_market = market_hpid and str(node.get("hpid") or "") == market_hpid
+                        same_group = group_hid and str(node.get("hid") or "") == group_hid
+                        if same_market or same_group:
+                            scoped.append(node)
+                            return
+                        for child in node.values():
+                            locate(child)
+                    elif isinstance(node, list):
+                        for child in node:
+                            locate(child)
+                locate(payload)
+                if scoped:
+                    scan_payload = scoped
+            found = _walk_field_values(scan_payload, aliases)
             values.extend((value, f"{source_name}:{where}") for value, where in found[field])
         distinct = {value for value, _ in values}
         if not distinct:
@@ -164,6 +184,11 @@ def _resolve_runtime_fields(sources, event_id):
             raise RuntimeError(f"赛事 {event_id} 字段 {field} 存在冲突来源：{origins}")
         resolved[field] = next(iter(distinct))
         resolved.setdefault("_sources", {})[field] = [where for _, where in values]
+    resolved["_event_id"] = str(event_id)
+    if market is not None:
+        resolved["_market_hpid"] = str(market.get("hpid") or "")
+    if group is not None:
+        resolved["_market_id"] = str(group.get("hid") or "")
     return resolved
 
 
@@ -301,7 +326,7 @@ class BrowserSessionBridge:
         walk(value)
         return found
 
-    def runtime_context_for_event(self, event_id):
+    def runtime_context_for_event(self, event_id, market=None, group=None):
         record = self._detail_responses.get(str(event_id))
         if not record:
             raise RuntimeError(
@@ -397,7 +422,7 @@ class BrowserSessionBridge:
                                     option.get("oid"), option.get("ov"))
                         if any(v in (None, "") for v in required):
                             continue
-                        runtime_context = self.runtime_context_for_event(event["mid"])
+                        runtime_context = self.runtime_context_for_event(event["mid"], market=market, group=group)
                         selections.append({
                             "event": event, "market": market, "group": group,
                             "option": option, "runtime_context": runtime_context,
