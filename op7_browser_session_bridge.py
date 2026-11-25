@@ -108,6 +108,15 @@ class BrowserSessionBridge:
         self.op7 = None
         self.pingbo = None
 
+    @staticmethod
+    def _prompt_site_url(label):
+        while True:
+            value = input(f"请输入 {label} 访问地址（http:// 或 https://）：").strip()
+            parsed = urlsplit(value)
+            if parsed.scheme in {"http", "https"} and parsed.hostname and not parsed.username and not parsed.password:
+                return value
+            print("地址无效：请输入完整的 http(s) 地址，且不要在 URL 中填写账号或密码。")
+
     def __enter__(self):
         self.profiles_dir.mkdir(parents=True, exist_ok=True)
         (self.profiles_dir / "op7").mkdir(parents=True, exist_ok=True)
@@ -119,20 +128,18 @@ class BrowserSessionBridge:
         self.pingbo = self.playwright.chromium.launch_persistent_context(
             str(self.profiles_dir / "pingbo"), headless=False,
             args=["--no-sandbox", "--disable-dev-shm-usage"])
-        for ctx, url, family in (
-            (self.op7, live.SITES["OP7_WEB"], "op7"),
-            (self.pingbo, live.SITES["PINGBO_WEB"], "pingbo"),
+        for ctx, label, family in (
+            (self.op7, "OP7", "op7"),
+            (self.pingbo, "Pingbo", "pingbo"),
         ):
             page = ctx.pages[0] if ctx.pages else ctx.new_page()
             page.on("request", lambda req, f=family: live.capture_request(req, f))
+            url = self._prompt_site_url(label)
             try:
-                if page.url == "about:blank":
-                    page.goto(url, wait_until="domcontentloaded", timeout=self.timeout * 1000)
-                else:
-                    page.reload(wait_until="domcontentloaded", timeout=self.timeout * 1000)
+                page.goto(url, wait_until="domcontentloaded", timeout=self.timeout * 1000)
             except PlaywrightTimeoutError:
                 pass
-        # Let the authenticated pages emit their normal API calls/templates.
+        # Allow the manually selected authenticated pages to emit their normal API calls.
         time.sleep(1.0)
         return self
 
