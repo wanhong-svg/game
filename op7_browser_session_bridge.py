@@ -98,6 +98,71 @@ def _find_pingbo_totals(event, target_line):
     return by_side
 
 
+def _decode_api_response(raw):
+    """Decode the API envelope; data may be Base64(gzip(JSON))."""
+    if isinstance(raw, (bytes, bytearray)):
+        raw = raw.decode("utf-8", "replace")
+    envelope = json.loads(raw) if isinstance(raw, str) else raw
+    if not isinstance(envelope, dict) or not isinstance(envelope.get("data"), str):
+        return envelope
+    import base64
+    import gzip
+    import binascii
+    encoded = envelope["data"].strip()
+    try:
+        packed = base64.b64decode(encoded, validate=True)
+        try:
+            decoded = gzip.decompress(packed)
+        except OSError:
+            decoded = packed
+        payload = json.loads(decoded.decode("utf-8"))
+    except (ValueError, OSError, UnicodeDecodeError, binascii.Error, json.JSONDecodeError):
+        # Never silently treat an undecoded opaque payload as a valid detail object.
+        raise RuntimeError("接口 data 字段不是可验证的 Base64/GZIP JSON") from None
+    result = dict(envelope)
+    result["data"] = payload
+    return result
+
+
+def _walk_field_values(value, aliases, found=None, path="$"):
+    found = found if found is not None else {name: [] for name in aliases}
+    if isinstance(value, dict):
+        for key, child in value.items():
+            normalized = str(key).replace("_", "").lower()
+            for canonical, variants in aliases.items():
+                if normalized in variants and child not in (None, "") and not isinstance(child, (dict, list)):
+                    found[canonical].append((str(child), f"{path}.{key}"))
+            _walk_field_values(child, aliases, found, f"{path}.{key}")
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            _walk_field_values(child, aliases, found, f"{path}[{index}]")
+    return found
+
+
+def _resolve_runtime_fields(sources, event_id):
+    aliases = {
+        "cuid": {"cuid"},
+        "device_imei": {"deviceimei", "deviceimei", "imei"},
+        "match_type": {"matchtype"},
+        "market_type_finally": {"markettypefinally"},
+    }
+    resolved = {}
+    for field in aliases:
+        values = []
+        for source_name, payload in sources:
+            found = _walk_field_values(payload, aliases)
+            values.extend((value, f"{source_name}:{where}") for value, where in found[field])
+        distinct = {value for value, _ in values}
+        if not distinct:
+            raise RuntimeError(f"赛事 {event_id} 详情上下文缺少字段 {field}；拒绝使用默认值")
+        if len(distinct) != 1:
+            origins = ", ".join(f"{value[:4]}…@{where}" for value, where in values)
+            raise RuntimeError(f"赛事 {event_id} 字段 {field} 存在冲突来源：{origins}")
+        resolved[field] = next(iter(distinct))
+        resolved.setdefault("_sources", {})[field] = [where for _, where in values]
+    return resolved
+
+
 class BrowserSessionBridge:
     """Own both persistent browser contexts for one CLI execution."""
 
@@ -153,6 +218,53 @@ class BrowserSessionBridge:
             if self.playwright:
                 self.playwright.stop()
 
+
+    def _capture_op7_response(self, response):
+        """Keep only in-memory parsed detail context; never print or persist identifiers."""
+        try:
+            parsed = urlsplit(response.url)
+            if not parsed.path.endswith("/yewu11/v1/w/matchDetail/getMatchDetailPB"):
+                return
+            query = dict(__import__("urllib.parse", fromlist=["parse_qsl"]).parse_qsl(parsed.query, keep_blank_values=True))
+            request = response.request
+            request_payload = {"url_params": query}
+            raw_body = getattr(request, "post_data", None)
+            if raw_body:
+                try:
+                    request_payload["body"] = json.loads(raw_body)
+                except Exception:
+                    request_payload["body"] = dict(__import__("urllib.parse", fromlist=["parse_qsl"]).parse_qsl(raw_body, keep_blank_values=True))
+            payload = _decode_api_response(response.text())
+            data = payload.get("data") if isinstance(payload, dict) else None
+            mid = str(query.get("mid") or (request_payload.get("body") or {}).get("mid") or "")
+            if not mid:
+                # Some deployments return the match id only in the decoded payload.
+                candidates = _walk_field_values(data, {"mid": {"mid"}})["mid"]
+                ids = {value for value, _ in candidates}
+                if len(ids) == 1:
+                    mid = next(iter(ids))
+            if not mid:
+                return
+            self._detail_responses[mid] = {
+                "request": request_payload,
+                "response": payload,
+                "captured_at": time.time(),
+            }
+        except Exception:
+            # A malformed/non-target response must not leak body or request metadata to logs.
+            return
+
+    def runtime_context_for_event(self, event_id):
+        record = self._detail_responses.get(str(event_id))
+        if not record:
+            raise RuntimeError(
+                f"未捕获赛事 {event_id} 的 getMatchDetailPB 详情响应；"
+                "请在 OP7 检测界面打开该场 NBA 赛事详情后重试"
+            )
+        return _resolve_runtime_fields(
+            [("detail_request", record["request"]), ("detail_response", record["response"])],
+            event_id,
+        )
 
     def discover_nba_events(self, max_pages=20):
         """Fetch current EB event pages and return only explicitly identified NBA events."""
