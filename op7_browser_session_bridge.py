@@ -360,7 +360,7 @@ class BrowserSessionBridge:
         path = "/yewu11/v1/m/matchesPagePB"
         input("请在已打开的 OP7 浏览器中手动进入「篮球 / NBA 正规赛事」列表，等待赛事加载完成后回到终端按 Enter：")
         capture_status = live.eb_nba_capture_status()
-        print("\\n=== EB NBA 页面监听状态 ===")
+        print("\n=== EB NBA 页面监听状态 ===")
         for endpoint, state in capture_status.items():
             short_name = endpoint.rsplit("/", 1)[-1]
             mark = "✓" if state["captured"] else ("已触发/未捕获" if state["seen"] else "未触发")
@@ -384,7 +384,7 @@ class BrowserSessionBridge:
                 for item in live.ENDPOINTS.get("discovered_endpoints", [])
                 if item.get("family") == "eb" and item.get("path")
             })
-            print("\\n=== EB 请求捕获诊断（不含凭证或请求体） ===")
+            print("\n=== EB 请求捕获诊断（不含凭证或请求体） ===")
             print("live 模块路径:", live.__file__)
             print("已捕获 EB 请求:", captured or "无")
             print("已发现 EB 请求路径:", discovered or "无")
