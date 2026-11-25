@@ -359,8 +359,21 @@ class BrowserSessionBridge:
         """Fetch current EB event pages and return only explicitly identified NBA events."""
         path = "/yewu11/v1/m/matchesPagePB"
         input("请在已打开的 OP7 浏览器中手动进入「篮球 / NBA 正规赛事」列表，等待赛事加载完成后回到终端按 Enter：")
+        capture_status = live.eb_nba_capture_status()
+        print("\\n=== EB NBA 页面监听状态 ===")
+        for endpoint, state in capture_status.items():
+            short_name = endpoint.rsplit("/", 1)[-1]
+            mark = "✓" if state["captured"] else ("已触发/未捕获" if state["seen"] else "未触发")
+            print(f"[{mark}] {short_name} method={state['method'] or '-'}")
+        page_seen = any(state["seen"] for state in capture_status.values())
+        core_ready = all(
+            capture_status[endpoint]["captured"]
+            for endpoint in live.EB_NBA_CORE_ENDPOINTS
+        )
+        print("页面状态：", "已进入 EB 赛事页面" if page_seen else "尚未检测到 EB 赛事接口")
+        print("检测状态：", "正常检测中" if core_ready else "未就绪（核心接口模板未全部捕获）")
         template = live.CAPTURED_REQUESTS.get(("eb", path))
-        if template is None:
+        if template is None or not core_ready:
             captured = sorted(
                 f"{family}:{captured_path}"
                 for family, captured_path in live.CAPTURED_REQUESTS
@@ -375,9 +388,14 @@ class BrowserSessionBridge:
             print("live 模块路径:", live.__file__)
             print("已捕获 EB 请求:", captured or "无")
             print("已发现 EB 请求路径:", discovered or "无")
+            missing_core = [
+                endpoint for endpoint in live.EB_NBA_CORE_ENDPOINTS
+                if not capture_status[endpoint]["captured"]
+            ]
             raise RuntimeError(
-                "已发现 EB 赛事列表请求路径，但内存中没有可用模板；"
-                "请检查请求监听器及 CAPTURED_REQUESTS 生命周期"
+                "EB NBA 页面监听尚未就绪；缺少核心接口模板："
+                + (", ".join(missing_core) if missing_core else path)
+                + "。请确认赛事列表加载完成，并检查 EB_CAPTURE_DEBUG。"
             )
         try:
             body = json.loads(template.get("post_data") or "{}")
