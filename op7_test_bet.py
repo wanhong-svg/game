@@ -430,7 +430,11 @@ def submit_test_bet(selection, stake, timeout=15, cross_odds_refresh=None, brows
             prior = json.loads(ORDER_AUDIT_PATH.read_text(encoding="utf-8")).get("records", [])
         except (OSError, json.JSONDecodeError):
             raise RuntimeError("bet order audit file is unreadable; refusing to submit")
-        if any(x.get("candidate_key") == key and x.get("state") in {"PREPARED", "ACCEPTED", "UNKNOWN"} for x in prior):
+        latest_state_by_key = {}
+        for record in prior:
+            if isinstance(record, dict) and record.get("candidate_key"):
+                latest_state_by_key[str(record["candidate_key"])] = record.get("state")
+        if latest_state_by_key.get(key) in {"PREPARED", "ACCEPTED", "UNKNOWN", "RECHECK_READY"}:
             raise RuntimeError("duplicate candidate already submitted or has uncertain outcome; refusing duplicate")
     _write_order_audit({
         "candidate_key": key, "state": "PREPARED",
