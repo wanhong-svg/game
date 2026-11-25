@@ -56,48 +56,50 @@ class AuthenticationRequired(RuntimeError):
 CAPTURED_REQUESTS={}
 CAPTURED_ORIGINS={}
 
-def persist_observed_endpoint(api_family, origin, host, path):
- """Persist discovered API routing metadata; never persist request headers or credentials."""
+def persist_observed_endpoint(api_family, origin, host, path, resource_type=None, method=None):
+ """Persist API discovery metadata only; never persist request bodies, headers or credentials."""
  config_path=Path(__file__).with_name('endpoints.json')
  config=json.loads(config_path.read_text(encoding='utf-8'))
- api=config.setdefault('apis',{}).setdefault(api_family,{})
- changed=False
- if api.get('base_url') != origin:
-  api['base_url']=origin; changed=True
- hosts=api.setdefault('hosts',[])
- if host not in hosts:
-  hosts.append(host); hosts.sort(); changed=True
- observed=api.setdefault('observed_paths',[])
- if path not in observed:
-  observed.append(path); observed.sort(); changed=True
- api['last_observed_at_utc']=now()
- if changed or not config_path.exists():
-  tmp=config_path.with_suffix('.json.tmp')
-  tmp.write_text(json.dumps(config,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
-  tmp.replace(config_path)
+ entry={'family':api_family,'origin':origin,'host':host,'path':path,
+        'resource_type':resource_type or 'unknown','method':method or 'GET','last_observed_at_utc':now()}
+ discovered=config.setdefault('discovered_endpoints',[])
+ key=(entry['family'],entry['origin'],entry['path'],entry['method'])
+ existing=next((x for x in discovered if (x.get('family'),x.get('origin'),x.get('path'),x.get('method'))==key),None)
+ if existing:
+  existing.update(entry)
+ else:
+  discovered.append(entry)
+ discovered.sort(key=lambda x:(x.get('family',''),x.get('host',''),x.get('path','')))
+ tmp=config_path.with_suffix('.json.tmp')
+ tmp.write_text(json.dumps(config,ensure_ascii=False,indent=2)+'\\n',encoding='utf-8')
+ tmp.replace(config_path)
  ENDPOINTS.clear(); ENDPOINTS.update(config)
 
 
 def capture_request(request, family):
  try:
   p=urllib.parse.urlsplit(request.url)
+  if p.scheme not in ('http','https') or not p.hostname: return
+  resource_type=getattr(request,'resource_type','')
+  if resource_type not in ('xhr','fetch'): return
+  api_family=('pingbo' if family=='pingbo' else
+              'eb' if p.path.startswith('/yewu11/') else
+              'fb' if p.path.startswith('/v1/match/') else
+              'common' if p.path.startswith('/api/') else 'op7_other')
+  origin=f'{p.scheme}://{p.netloc}'
+  # Discover all XHR/fetch routes, including paths not yet present in endpoints.json.
+  persist_observed_endpoint(api_family,origin,p.netloc,p.path,resource_type,request.method)
   known_paths={path for paths in ALLOW.values() for path in paths}
-  # Only capture the configured API paths; browser assets and unrelated requests are ignored.
-  if p.scheme not in ('http','https') or p.path not in known_paths: return
-  api_family='pingbo' if p.path.startswith('/sports-service/') else ('eb' if p.path.startswith('/yewu11/') else 'fb')
-  if request.method not in ('GET','POST'): return
+  if p.path not in known_paths or request.method not in ('GET','POST'): return
   key=(api_family,p.path)
   headers={k:v for k,v in request.headers.items()
    if k.lower() not in {'cookie','host','content-length','connection','accept-encoding','transfer-encoding','authorization'}
    and not k.lower().startswith('sec-')}
   CAPTURED_REQUESTS[key]={'method':request.method,'url':request.url,'headers':headers,'post_data':request.post_data}
-  origin=f'{p.scheme}://{p.netloc}'
-  CAPTURED_ORIGINS[api_family]=origin
-  # Persist only routing metadata. Session headers, cookies, tokens and request bodies stay in memory.
-  persist_observed_endpoint(api_family,origin,p.netloc,p.path)
-  # Keep the runtime allowlist synchronized with the observed API host.
-  api=ENDPOINTS.get('apis',{}).get(api_family,{})
-  ALLOW[p.netloc]=set(api.get('read_paths',[]))
+  if api_family in ('fb','eb','pingbo','common'):
+   CAPTURED_ORIGINS[api_family]=origin
+   api=ENDPOINTS.get('apis',{}).get(api_family,{})
+   ALLOW[p.netloc]=set(api.get('read_paths',[]))
  except Exception as exc:
   print(f'浏览器请求捕获/配置更新失败：{type(exc).__name__}: {exc}',file=sys.stderr)
 
