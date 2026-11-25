@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import ipaddress
 import time
+import threading
 import json
 import os
 import urllib.error
@@ -21,6 +22,19 @@ ORDER_AUDIT_PATH = Path(__file__).with_name("bet_order_audit.json")
 MAX_SUCCESSFUL_BETS_PER_EVENT = 5
 LATEST_PATH, LIMIT_PATH, BET_PATH = ENDPOINTS["apis"]["eb"]["bet_paths"]
 
+
+
+_EXECUTION_STAGE = '脚本初始化'
+_EXECUTION_STAGE_LOCK = threading.Lock()
+def _set_execution_stage(stage):
+    global _EXECUTION_STAGE
+    with _EXECUTION_STAGE_LOCK:
+        _EXECUTION_STAGE = str(stage)
+def _heartbeat(stop_event):
+    while not stop_event.wait(5):
+        with _EXECUTION_STAGE_LOCK:
+            stage = _EXECUTION_STAGE
+        print('[执行状态] 当前环节=' + stage, flush=True)
 
 def load_runtime_endpoints():
     return json.loads(Path(__file__).with_name("endpoints.json").read_text(encoding="utf-8"))
@@ -368,10 +382,19 @@ def submit_test_bet(selection, stake, timeout=15, cross_odds_refresh=None, brows
     eb_config = runtime_endpoints["apis"]["eb"]
     base_url = validate_test_target(os.environ.get("OP7_TEST_BET_BASE_URL", eb_config.get("bet_api_base_url") or eb_config["base_url"]))
     headers = _headers()
-    latest_response = post_json(base_url, LATEST_PATH, build_latest_market_request(selection), headers, timeout, browser_session)
+    _set_execution_stage("请求 EB 最新盘口数据")
+    latest_request = build_latest_market_request(selection)
+    latest_response = post_json(base_url, LATEST_PATH, latest_request, headers, timeout, browser_session)
     latest_rows = require_success(latest_response, LATEST_PATH)
-    if not isinstance(latest_rows, list):
-        raise RuntimeError("latest market response has no data list; stopped before bet")
+    if not isinstance(latest_rows, list) or not latest_rows:
+        if browser_session is None:
+            raise RuntimeError("EB 最新盘口接口未返回数据，当前没有可等待的浏览器会话")
+        browser_session.confirm_and_wait_eb_retry(LATEST_PATH)
+        _set_execution_stage("人工确认后重新请求 EB 最新盘口数据")
+        latest_response = post_json(base_url, LATEST_PATH, latest_request, headers, timeout, browser_session)
+        latest_rows = require_success(latest_response, LATEST_PATH)
+    if not isinstance(latest_rows, list) or not latest_rows:
+        raise RuntimeError("人工确认后 EB 最新盘口接口仍未返回数据；停止本次投注")
     latest = next((x for x in latest_rows if str(x.get("id")) == str(selection["group"]["hid"])), None)
     if latest is None:
         raise RuntimeError("selected market is no longer available; stopped before bet")
@@ -404,6 +427,7 @@ def submit_test_bet(selection, stake, timeout=15, cross_odds_refresh=None, brows
         cross_odds_refresh = lambda: browser_session.refresh_cross_odds(selection)
     if cross_odds_refresh is None:
         raise RuntimeError("未连接浏览器会话，无法自动刷新 EB/Pingbo 双边赔率；已停止")
+    _set_execution_stage("投注前最后一次 EB/Pingbo 赔率复核")
     cross_check = refresh_and_validate_cross_odds(cross_odds_refresh, max_seconds=5.0)
     selected_side = str(selection["option"].get("ot") or "").lower()
     if selected_side != cross_check["direction"].lower():
@@ -417,10 +441,19 @@ def submit_test_bet(selection, stake, timeout=15, cross_odds_refresh=None, brows
         raise RuntimeError("5秒复核后的 EB 最新赔率无效；已停止")
 
     # Query the limit using the odds from the same fresh cross-book snapshot.
-    limit_response = post_json(base_url, LIMIT_PATH, build_limit_request(selection, odds_value), headers, timeout, browser_session)
+    _set_execution_stage("请求 EB 投注限额数据")
+    limit_request = build_limit_request(selection, odds_value)
+    limit_response = post_json(base_url, LIMIT_PATH, limit_request, headers, timeout, browser_session)
     limit_rows = require_success(limit_response, LIMIT_PATH)
     if not isinstance(limit_rows, list) or not limit_rows or not limit_rows[0].get("minBet"):
-        raise RuntimeError("stake limit response is incomplete; stopped before bet")
+        if browser_session is None:
+            raise RuntimeError("EB 投注限额接口未返回数据，当前没有可等待的浏览器会话")
+        browser_session.confirm_and_wait_eb_retry(LIMIT_PATH)
+        _set_execution_stage("人工确认后重新请求 EB 投注限额数据")
+        limit_response = post_json(base_url, LIMIT_PATH, limit_request, headers, timeout, browser_session)
+        limit_rows = require_success(limit_response, LIMIT_PATH)
+    if not isinstance(limit_rows, list) or not limit_rows or not limit_rows[0].get("minBet"):
+        raise RuntimeError("人工确认后 EB 投注限额接口仍未返回有效数据；停止本次投注")
     min_stake = as_decimal(limit_rows[0]["minBet"])
     if min_stake is None or amount < min_stake:
         raise RuntimeError("stake is below the confirmed minimum; stopped before bet")
@@ -479,6 +512,7 @@ def submit_test_bet(selection, stake, timeout=15, cross_odds_refresh=None, brows
             ) from None
 
     # First submission; retry the exact same payload once only after an explicit API rejection.
+    _set_execution_stage("提交 EB 模拟投注请求")
     bet_response, parsed_result, accepted = send_once(payload, "initial")
     if not accepted:
         _write_order_audit({
@@ -663,6 +697,7 @@ def auto_run_once(browser_session, stake, timeout, output_path, candidates=None)
 
     round_results = []
     for event_id, event_candidates in events.items():
+        _set_execution_stage("处理赛事 " + event_id + "：整理全场大小盘口")
         if _successful_bet_counts().get(event_id, 0) >= MAX_SUCCESSFUL_BETS_PER_EVENT:
             continue
         groups = {}
@@ -686,6 +721,7 @@ def auto_run_once(browser_session, stake, timeout, output_path, candidates=None)
                 f"当前赛事盘口 {group_index}/{len(groups)}：{matchup}，全场大小={line}；准备进行首次赔率校验。",
                 flush=True,
             )
+            _set_execution_stage("赔率首次校验：" + matchup + " 全场大小=" + str(line))
             print("[盘口校验中]", f"赛事={matchup}", f"event_id={event_id}", f"全场大小={line}", flush=True)
             try:
                 first_cross = refresh_and_validate_cross_odds(
@@ -701,7 +737,9 @@ def auto_run_once(browser_session, stake, timeout, output_path, candidates=None)
                 if first_candidate is None:
                     continue
                 print("[执行节点]", "首次规则校验通过，等待 5 秒后进行第二次赔率校验。", flush=True)
+                _set_execution_stage("等待 5 秒后进行二次赔率校验：" + matchup)
                 time.sleep(5)
+                _set_execution_stage("赔率二次校验：" + matchup + " 全场大小=" + str(line))
                 second_cross = refresh_and_validate_cross_odds(
                     lambda p=first_candidate: browser_session.refresh_cross_odds(p), max_seconds=5.0
                 )
@@ -718,6 +756,7 @@ def auto_run_once(browser_session, stake, timeout, output_path, candidates=None)
                 print("[执行节点]", "二次校验通过，正在读取最新投注限额并组装投注参数。", flush=True)
                 selection = _selection_with_runtime(candidate)
                 saved_path = _write_selection_file(selection, output_path)
+                _set_execution_stage("提交模拟投注：" + matchup + " 全场大小=" + str(line))
                 print("[执行节点]", "投注参数已保存，正在提交本次模拟投注。", flush=True)
                 result = submit_test_bet(
                     selection, stake, timeout,
@@ -769,11 +808,15 @@ def main():
             eb_config.get("bet_api_base_url") or eb_config["base_url"],
         ))
         from op7_browser_session_bridge import BrowserSessionBridge
+        heartbeat_stop = threading.Event()
+        heartbeat_thread = threading.Thread(target=_heartbeat, args=(heartbeat_stop,), daemon=True)
+        heartbeat_thread.start()
         with BrowserSessionBridge(profiles_dir=args.profiles_dir, timeout=args.timeout) as browser_session:
             first_round = True
             while True:
                 try:
                     if first_round:
+                        _set_execution_stage("首次初始化：打开 OP7 与 Pingbo 浏览器窗口")
                         print("[执行节点] 首次启动：请等待 OP7 与 Pingbo 浏览器窗口打开。", flush=True)
                         input(
                             "【页面操作 1】请在 OP7 浏览器进入「篮球 / NBA 正规赛事」列表页面；"
@@ -781,10 +824,13 @@ def main():
                         )
                         browser_session._nba_capture_confirmed = True
                         first_round = False
-                    print("[执行节点]", "开始获取当日 NBA 完整赛事列表（本轮重新获取，不复用上一轮列表）。", flush=True)
+                        _set_execution_stage("已进入 NBA 列表页，等待刷新并捕获列表请求")
+                    _set_execution_stage("捕获 NBA 列表刷新请求并读取当日完整赛事")
+                    print("[执行节点]", "已确认 NBA 列表页，准备捕获本轮刷新请求。", flush=True)
                     # Suppress diagnostics only; bridge prompts/stages use sys.__stdout__.
                     with contextlib.redirect_stdout(io.StringIO()):
                         candidates = browser_session.discover_nba_total_selections()
+                    _set_execution_stage("NBA 列表读取完成，准备处理 " + str(len(candidates)) + " 个盘口")
                     print("[执行节点]", f"本轮盘口发现完成，候选盘口数={len(candidates)}。", flush=True)
                     if candidates:
                         auto_run_once(
@@ -797,6 +843,7 @@ def main():
                 except Exception as exc:
                     print("[错误]", f"{type(exc).__name__}: {str(exc)[:400]}", flush=True)
                 # Wait only after the entire currently discovered NBA slate is processed.
+                _set_execution_stage("本轮结束，等待 120 秒后重新获取赛事列表")
                 print("[执行节点]", "本轮所有 NBA 赛事处理完毕，暂停 120 秒；随后重新获取当日赛事列表。", flush=True)
                 time.sleep(120)
         return
