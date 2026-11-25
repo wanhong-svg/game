@@ -441,19 +441,147 @@ def submit_test_bet(selection, stake, timeout=15, cross_odds_refresh=None, brows
         "direction": selected_side, "stake_yuan": str(amount),
         "cross_check": {k: v for k, v in cross_check.items() if k != "snapshot"},
     })
-    try:
-        bet_response = post_json(base_url, BET_PATH, payload, headers, timeout, browser_session)
-        parsed_result = parse_bet_result(bet_response)
-    except Exception as exc:
-        # A timeout/error after POST is an unknown outcome. Never auto-retry.
+    event_id = str(selection["event"].get("mid"))
+
+    def send_once(request_payload, attempt_label):
+        try:
+            response = post_json(base_url, BET_PATH, request_payload, headers, timeout, browser_session)
+        except Exception as exc:
+            _write_order_audit({
+                "candidate_key": key, "event_id": event_id, "state": "UNKNOWN",
+                "attempt": attempt_label,
+                "updated_at_utc": datetime.now(timezone.utc).isoformat(),
+                "error_type": type(exc).__name__, "error": str(exc),
+            })
+            raise RuntimeError(
+                "bet POST outcome is uncertain; no automatic retry or re-comparison was made"
+            ) from None
+        if not isinstance(response, dict) or str(response.get("code")) != "0000000":
+            return response, None, False
+        try:
+            return response, parse_bet_result(response), True
+        except Exception as exc:
+            _write_order_audit({
+                "candidate_key": key, "event_id": event_id, "state": "UNKNOWN",
+                "attempt": attempt_label,
+                "updated_at_utc": datetime.now(timezone.utc).isoformat(),
+                "error_type": type(exc).__name__, "error": str(exc),
+            })
+            raise RuntimeError(
+                "bet API returned success but order acceptance could not be verified; "
+                "no automatic retry was made"
+            ) from None
+
+    # First submission; retry the exact same payload once only after an explicit API rejection.
+    bet_response, parsed_result, accepted = send_once(payload, "initial")
+    if not accepted:
         _write_order_audit({
-            "candidate_key": key, "state": "UNKNOWN",
+            "candidate_key": key, "event_id": event_id, "state": "REJECTED",
+            "attempt": "initial",
             "updated_at_utc": datetime.now(timezone.utc).isoformat(),
-            "error_type": type(exc).__name__, "error": str(exc),
+            "api_code": bet_response.get("code") if isinstance(bet_response, dict) else "INVALID_RESPONSE",
+            "api_message": str(bet_response.get("msg") or "")[:300] if isinstance(bet_response, dict) else "",
         })
-        raise RuntimeError("bet POST outcome is uncertain; inspect the test account/order history before any retry") from None
+        bet_response, parsed_result, accepted = send_once(payload, "retry_same_payload")
+
+    if not accepted:
+        _write_order_audit({
+            "candidate_key": key, "event_id": event_id, "state": "REJECTED",
+            "attempt": "retry_same_payload",
+            "updated_at_utc": datetime.now(timezone.utc).isoformat(),
+            "api_code": bet_response.get("code") if isinstance(bet_response, dict) else "INVALID_RESPONSE",
+            "api_message": str(bet_response.get("msg") or "")[:300] if isinstance(bet_response, dict) else "",
+        })
+        # The same-payload retry failed: compare this exact event/market once more.
+        try:
+            refreshed_cross = refresh_and_validate_cross_odds(cross_odds_refresh, max_seconds=5.0)
+            if str(refreshed_cross.get("direction") or "").lower() != selected_side:
+                raise RuntimeError("重新比较后的方向已变化")
+            refreshed_eb_odds = as_decimal(refreshed_cross.get("snapshot", {}).get("eb_" + selected_side))
+            if refreshed_eb_odds is None or refreshed_eb_odds <= 1:
+                raise RuntimeError("重新比较未取得有效 EB 赔率")
+            refreshed_odds_value = int(
+                (refreshed_eb_odds * Decimal(100000)).quantize(Decimal("1"))
+            )
+            refreshed_latest_response = post_json(
+                base_url, LATEST_PATH, build_latest_market_request(selection),
+                headers, timeout, browser_session
+            )
+            refreshed_latest_rows = require_success(refreshed_latest_response, LATEST_PATH)
+            if not isinstance(refreshed_latest_rows, list):
+                raise RuntimeError("重新比较后最新盘口数据格式无效")
+            refreshed_latest = next((
+                row for row in refreshed_latest_rows
+                if str(row.get("id")) == str(selection["group"]["hid"])
+            ), None)
+            if refreshed_latest is None:
+                raise RuntimeError("重新比较后原盘口已不存在")
+            if str(refreshed_latest.get("matchInfoId") or "") != event_id:
+                raise RuntimeError("重新比较后赛事 ID 不匹配")
+            if str(refreshed_latest.get("playId") or refreshed_latest.get("chpid") or "") != str(selection["market"].get("hpid")):
+                raise RuntimeError("重新比较后盘口类型不匹配")
+            refreshed_options = refreshed_latest.get("marketOddsList") or []
+            refreshed_option = next((
+                row for row in refreshed_options
+                if str(row.get("id")) == str(selection["option"]["oid"])
+                and str(row.get("oddsType")) == selected_side
+            ), None)
+            if refreshed_option is None or refreshed_option.get("oddsStatus") not in (1, "1"):
+                raise RuntimeError("重新比较后原投注选项不可用")
+            if refreshed_odds_value <= 100000:
+                raise RuntimeError("重新比较后的赔率无效")
+            refreshed_limit_response = post_json(
+                base_url, LIMIT_PATH,
+                build_limit_request(selection, refreshed_odds_value),
+                headers, timeout, browser_session
+            )
+            refreshed_limit_rows = require_success(refreshed_limit_response, LIMIT_PATH)
+            if not isinstance(refreshed_limit_rows, list) or not refreshed_limit_rows or not refreshed_limit_rows[0].get("minBet"):
+                raise RuntimeError("重新比较后的投注限额数据不完整")
+            refreshed_min_stake = as_decimal(refreshed_limit_rows[0]["minBet"])
+            if refreshed_min_stake is None or amount < refreshed_min_stake:
+                raise RuntimeError("重新比较后的最低投注额超过本次投注金额")
+            refreshed_payload = build_bet_payload(
+                selection, amount, odds_value=refreshed_odds_value,
+                latest_market=refreshed_latest
+            )
+        except Exception as exc:
+            _write_order_audit({
+                "candidate_key": key, "event_id": event_id, "state": "ABANDONED",
+                "attempt": "one_time_recomparison",
+                "updated_at_utc": datetime.now(timezone.utc).isoformat(),
+                "reason": str(exc)[:400],
+            })
+            raise RuntimeError(
+                "同盘口重试仍失败；已完成唯一一次重新比较，但条件不再满足或盘口数据无效，本次投注放弃"
+            ) from None
+
+        _write_order_audit({
+            "candidate_key": key, "event_id": event_id, "state": "RECHECK_READY",
+            "attempt": "one_time_recomparison",
+            "updated_at_utc": datetime.now(timezone.utc).isoformat(),
+            "latest_odds": format(Decimal(refreshed_odds_value) / Decimal(100000), "f"),
+        })
+        bet_response, parsed_result, accepted = send_once(
+            refreshed_payload, "after_one_time_recomparison"
+        )
+        if not accepted:
+            _write_order_audit({
+                "candidate_key": key, "event_id": event_id, "state": "ABANDONED",
+                "attempt": "after_one_time_recomparison",
+                "updated_at_utc": datetime.now(timezone.utc).isoformat(),
+                "api_code": bet_response.get("code") if isinstance(bet_response, dict) else "INVALID_RESPONSE",
+                "api_message": str(bet_response.get("msg") or "")[:300] if isinstance(bet_response, dict) else "",
+            })
+            raise RuntimeError("重新比较后再次投注仍被接口拒绝；本次匹配已放弃，不再重试")
+
+        odds_value = refreshed_odds_value
+        min_stake = refreshed_min_stake
+        cross_check = refreshed_cross
+        latest = refreshed_latest
+
     _write_order_audit({
-        "candidate_key": key, "event_id": str(selection["event"].get("mid")),
+        "candidate_key": key, "event_id": event_id,
         "state": "ACCEPTED",
         "updated_at_utc": datetime.now(timezone.utc).isoformat(),
         "orders": parsed_result["orders"],
