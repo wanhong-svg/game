@@ -54,7 +54,7 @@ def _find_eb_totals(raw, event_id, line):
     return result
 
 
-def _event_progress_signature(event):
+def _event_progress_signature(event, reverse_score=False):
     """Extract only explicit period, clock and score fields; never infer a live state."""
     aliases = {
         "period": {"period","quarter","currentperiod","currentquarter","periodname","quartername","stage"},
@@ -83,7 +83,14 @@ def _event_progress_signature(event):
         if unique:
             result[key] = unique[0]
     if "score" not in result and {"home_score","away_score"} <= result.keys():
-        result["score"] = result["home_score"] + "-" + result["away_score"]
+        home_score, away_score = result["home_score"], result["away_score"]
+        if reverse_score:
+            home_score, away_score = away_score, home_score
+        result["score"] = home_score + "-" + away_score
+    elif reverse_score and "score" in result:
+        score_match = re.fullmatch(r"\\s*(\\d+)\\s*[-:]\\s*(\\d+)\\s*", result["score"])
+        if score_match:
+            result["score"] = score_match.group(2) + "-" + score_match.group(1)
     if not {"period","clock","score"} <= result.keys():
         return None
     return (result["period"].lower(), result["clock"].lower(), result["score"].lower())
@@ -112,7 +119,7 @@ def _find_pingbo_event(payload, event):
         # All cases use exact kickoff equality when both source timestamps exist;
         # otherwise a complete live period+clock+score signature must match.
         kickoff_match = target_time is not None and stamp is not None and target_time == stamp
-        pb_progress = _event_progress_signature(item.get("_raw_event") or item)
+        pb_progress = _event_progress_signature(item.get("_raw_event") or item, reverse_score=reverse)
         progress_match = (
             eb_progress is not None and pb_progress is not None
             and eb_progress == pb_progress
