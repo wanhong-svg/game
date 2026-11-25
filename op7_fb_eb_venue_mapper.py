@@ -189,8 +189,9 @@ def is_nba_league(value):
         return False
     if 'G-LEAGUE' in label or 'G联赛' in label or '发展联盟' in label:
         return False
-    return label in {'NBA','NBA常规赛','NBA季后赛','美国职业篮球','美国职业篮球联赛',
-                     '美國職業籃球','美國職業籃球聯賽'}
+    return (label.startswith('NBA') or
+            label.startswith('美国职业篮球') or
+            label.startswith('美國職業籃球'))
 
 def extract_pingbo_events(payload):
     found=[]
@@ -212,6 +213,17 @@ def extract_pingbo_events(payload):
                 if isinstance(value,(str,int,float)) and str(value).strip():
                     context['league']=str(value)
                     break
+                if isinstance(value,dict):
+                    nested=first(value,'na','nm','name','leagueName')
+                    if nested not in (None,''):
+                        context['league']=str(nested)
+                        break
+            if not context.get('league'):
+                league_obj=x.get('lg') or x.get('leagueInfo') or x.get('league_info')
+                if isinstance(league_obj,dict):
+                    nested=first(league_obj,'na','nm','name','leagueName')
+                    if nested not in (None,''):
+                        context['league']=str(nested)
             for key in ('sport','sportName','sport_name','csna'):
                 value=x.get(key)
                 if isinstance(value,(str,int,float)) and str(value).strip():
