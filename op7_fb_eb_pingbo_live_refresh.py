@@ -164,7 +164,7 @@ def capture_request(request, family):
    headers={k:v for k,v in request.headers.items()
     if k.lower() not in {'cookie','host','content-length','connection','accept-encoding','transfer-encoding'}
     and not k.lower().startswith('sec-')}
-   CAPTURED_REQUESTS[key]={'method':request.method,'url':request.url,'headers':headers,'post_data':request.post_data}
+   CAPTURED_REQUESTS[key]={'method':request.method,'url':request.url,'headers':headers,'post_data':request.post_data,'captured_at_monotonic':time.monotonic()}
    captured=True
    if api_family in ('fb','eb','pingbo','common'):
     origin_key='eb_bet' if api_family=='eb' and p.path.startswith('/yewu13/') else api_family
