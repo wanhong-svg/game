@@ -189,6 +189,7 @@ class BrowserSessionBridge:
         self._detail_responses = {}
         self._odds_responses = {}
         self._init_responses = []
+        self._manual_bet_runtime_requests = []
         self._odds_request_template = None
         self._list_responses = {}
         self._request_templates_by_id = {}
@@ -286,8 +287,49 @@ class BrowserSessionBridge:
         try:
             parsed = urlsplit(request.url)
             live.capture_request(request, "op7")
+            # Observe the manual bet API request without modifying or aborting it.
+            # Keep the parsed payload in memory only; never log field values or headers.
+            if parsed.path.startswith("/yewu13/") and (
+                parsed.path.endswith("/bet") or "/betOrder/client/bet" in parsed.path
+            ):
+                bet_payload = {
+                    "query": dict(parse_qsl(parsed.query, keep_blank_values=True))
+                }
+                raw_bet_body = getattr(request, "post_data", None)
+                if raw_bet_body:
+                    try:
+                        bet_payload["body"] = json.loads(raw_bet_body)
+                    except Exception:
+                        bet_payload["body"] = dict(parse_qsl(raw_bet_body, keep_blank_values=True))
+                aliases = {
+                    "device_imei": {"deviceimei", "imei"},
+                    "cuid": {"cuid"},
+                    "match_type": {"matchtype"},
+                    "market_type_finally": {"markettypefinally"},
+                }
+                found = _walk_field_values(bet_payload, aliases)
+                self._manual_bet_runtime_requests.append({
+                    "path": parsed.path,
+                    "method": request.method,
+                    "payload": bet_payload,
+                    "captured_at": time.monotonic(),
+                    "fields_found": {name: bool(entries) for name, entries in found.items()},
+                })
+                self._manual_bet_runtime_requests = self._manual_bet_runtime_requests[-5:]
+                for field, entries in found.items():
+                    paths = sorted({where for _, where in entries})
+                    print(
+                        "[EB_MANUAL_BET_RUNTIME_DIAG]",
+                        f"method={request.method}",
+                        f"path={parsed.path}",
+                        f"field={field}",
+                        f"found={bool(entries)}",
+                        f"paths={json.dumps(paths, ensure_ascii=False)}",
+                        "request_forwarded=True",
+                        flush=True,
+                    )
             # Trace only the presence and paths of explicitly named runtime fields
-            # in OP7 request query/body data. Never log values, headers, cookies or URLs.
+            # in OP7 read requests. Never log values, headers, cookies or URLs.
             if parsed.path.startswith("/yewu11/"):
                 runtime_aliases = {
                     "device_imei": {"deviceimei", "imei"},
@@ -632,6 +674,20 @@ class BrowserSessionBridge:
             ])
         for index, payload in enumerate(self._init_responses):
             sources.append((f"init_response[{index}]", payload))
+        # The latest manually submitted bet request is observed as-is and was
+        # forwarded normally by the browser. The payload remains memory-only.
+        if self._manual_bet_runtime_requests:
+            latest_manual = self._manual_bet_runtime_requests[-1]
+            sources.append((
+                f"manual_bet_request:{latest_manual['path']}",
+                latest_manual["payload"],
+            ))
+            print(
+                "[EB_MANUAL_BET_RUNTIME_SOURCE]",
+                f"path={latest_manual['path']}",
+                f"captured_fields={json.dumps(latest_manual['fields_found'], ensure_ascii=False, sort_keys=True)}",
+                flush=True,
+            )
 
         # Inspect only explicitly named runtime keys in browser storage. Values stay
         # in process memory and are never written to logs or files.
@@ -896,6 +952,24 @@ class BrowserSessionBridge:
             raise RuntimeError(
                 "未捕获 getMatchOddsInfoPB 真实请求；未使用固定 cuid，停止盘口发现"
             )
+        # Ask for one manual OP7 confirmation on the same NBA event/market.
+        # The request is not intercepted: the browser sends it normally.
+        self._manual_bet_runtime_requests.clear()
+        input(
+            "参数采集步骤：请在 OP7 浏览器中选择本轮目标 NBA 赛事及全场大小盘口，"
+            "按页面正常流程手动确认一次模拟投注；请求会正常发送。"
+            "完成后回到终端按 Enter，脚本读取该请求中的运行参数："
+        )
+        for page in list(self.op7.pages):
+            try:
+                page.wait_for_timeout(500)
+            except Exception:
+                pass
+        if not self._manual_bet_runtime_requests:
+            raise RuntimeError(
+                "未捕获到人工投注接口请求；请确认页面已正常提交，并检查接口路径是否为 /yewu13/.../bet"
+            )
+
         selections = []
         diagnostics = {
             "nba_events": len(events),
