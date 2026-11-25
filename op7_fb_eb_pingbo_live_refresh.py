@@ -173,7 +173,7 @@ def capture_request(request, family):
     api=ENDPOINTS.get('apis',{}).get(api_family,{})
     ALLOW[p.netloc]=set(api.get('read_paths',[]))
   if api_family=='pingbo':
-   print('[pingBo_CAPTURE]',f'method={request.method}',f'path={p.path}',f'resource_type={resource_type}',f'allowed={allowed}',f'captured={captured}',flush=True)
+   print('【pingBo】[CAPTURE]',f'method={request.method}',f'path={p.path}',f'resource_type={resource_type}',f'allowed={allowed}',f'captured={captured}',flush=True)
   if api_family=='eb' and p.path in EB_NBA_PAGE_ENDPOINTS:
    state=EB_NBA_CAPTURE_STATE[p.path]
    state['seen']=True
