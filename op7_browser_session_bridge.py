@@ -153,6 +153,87 @@ class BrowserSessionBridge:
             if self.playwright:
                 self.playwright.stop()
 
+
+    def discover_nba_events(self, max_pages=20):
+        """Fetch current EB event pages and return only explicitly identified NBA events."""
+        path = "/yewu11/v1/m/matchesPagePB"
+        template = live.CAPTURED_REQUESTS.get(("eb", path))
+        if template is None:
+            raise RuntimeError("未捕获 EB 赛事列表请求；请在 OP7 页面进入篮球/NBA赛事列表后重试")
+        try:
+            body = json.loads(template.get("post_data") or "{}")
+        except Exception:
+            raise RuntimeError("无法解析浏览器捕获的 EB 赛事列表请求参数") from None
+        if not isinstance(body, dict):
+            raise RuntimeError("EB 赛事列表请求体不是 JSON 对象")
+        body.setdefault("cpn", 1)
+        body.setdefault("cps", 50)
+        try:
+            total_pages = 1
+            page_size = max(1, min(int(body.get("cps", 50)), 100))
+        except (TypeError, ValueError):
+            page_size = 50
+            body["cps"] = page_size
+        origin = live.CAPTURED_ORIGINS.get("eb", live.SITES["EB_ORIGIN"])
+        rows_by_id = {}
+        for page_no in range(1, max(1, int(max_pages)) + 1):
+            body["cpn"] = page_no
+            response = live.request_json(
+                self.op7, origin + path, "POST",
+                live.headers_env("OP7_READONLY_HEADERS_JSON"),
+                body=body, timeout_ms=self.timeout * 1000, family="eb")
+            data = live.data_of(response)
+            if isinstance(data, dict):
+                try:
+                    total_pages = max(1, min(int(data.get("pages") or 1), int(max_pages)))
+                except (TypeError, ValueError):
+                    total_pages = 1
+                events = data.get("data") or []
+            elif isinstance(data, list):
+                events = data
+                total_pages = 1
+            else:
+                raise RuntimeError("EB 赛事列表响应结构无法识别；拒绝猜测赛事字段")
+            for event in events:
+                if not isinstance(event, dict) or str(event.get("csid")) != "2":
+                    continue
+                league_names = {
+                    str(event.get(k) or "").strip().upper()
+                    for k in ("tn", "tnjc") if str(event.get(k) or "").strip()
+                }
+                if not league_names or league_names != {"NBA"}:
+                    continue
+                if not event.get("mid") or not isinstance(event.get("hps"), list):
+                    continue
+                rows_by_id[str(event["mid"])] = event
+            if page_no >= total_pages:
+                break
+        return list(rows_by_id.values())
+
+    def discover_nba_total_selections(self):
+        """Build current full-game totals selections from live NBA event trees only."""
+        events = self.discover_nba_events()
+        selections = []
+        for event in events:
+            for market in event.get("hps") or []:
+                if not isinstance(market, dict) or str(market.get("hpid")) != "38":
+                    continue
+                for group in market.get("hl") or []:
+                    if not isinstance(group, dict) or group.get("hv") in (None, ""):
+                        continue
+                    for option in group.get("ol") or []:
+                        if not isinstance(option, dict) or str(option.get("ot") or "").strip().lower() not in {"under", "over"}:
+                            continue
+                        required = (event.get("mid"), event.get("tid"), event.get("csid"),
+                                    event.get("csna"), market.get("hpn"), group.get("hid"),
+                                    option.get("oid"), option.get("ov"))
+                        if any(v in (None, "") for v in required):
+                            continue
+                        selections.append({"event": event, "market": market, "group": group, "option": option})
+        if not selections:
+            raise RuntimeError("实时赛事列表中没有找到可确认 ID 的 NBA 正规赛事全场大小分选项")
+        return selections
+
     def post_json(self, base_url, path, body, headers, timeout=15):
         url = base_url.rstrip("/") + path
         captured = live.CAPTURED_REQUESTS.get(("eb", path))
