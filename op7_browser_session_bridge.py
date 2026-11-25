@@ -283,6 +283,26 @@ class BrowserSessionBridge:
         try:
             parsed = urlsplit(request.url)
             live.capture_request(request, "op7")
+            # Detail-page requests need their own sanitized trace. The generic
+            # capture helper intentionally logs only the NBA list lifecycle,
+            # so without this line an unseen detail request is indistinguishable
+            # from a click that emitted no API call.
+            if parsed.path.startswith("/yewu11/") and (
+                "detail" in parsed.path.lower() or "matchdetail" in parsed.path.lower()
+            ):
+                api = live.ENDPOINTS.get("apis", {}).get("eb", {})
+                allowed_paths = set(api.get("read_paths", []) + api.get("bet_paths", []))
+                captured_template = live.CAPTURED_REQUESTS.get(("eb", parsed.path))
+                print(
+                    "[EB_DETAIL_REQUEST]",
+                    "family=op7",
+                    f"method={request.method}",
+                    f"path={parsed.path}",
+                    f"resource_type={getattr(request, 'resource_type', '')}",
+                    f"allowed={parsed.path in allowed_paths}",
+                    f"captured={bool(captured_template)}",
+                    flush=True,
+                )
             if parsed.path in {
                 "/yewu11/v1/m/matchesPagePB",
                 "/yewu11/v1/m/noLiveMatchesPagePB",
