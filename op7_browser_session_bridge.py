@@ -9,6 +9,7 @@ to the endpoint configuration file.
 import json
 import re
 import sys
+import threading
 import time
 from decimal import Decimal
 from pathlib import Path
@@ -334,6 +335,48 @@ class BrowserSessionBridge:
         self._ignored_event_ids = set()
         self._pingbo_feed_responses = {}
         self._pingbo_capture_confirmed = False
+        self._pending_event_snapshots = {"EB": None, "PINGBO": None}
+        self._pending_event_snapshot_lock = threading.Lock()
+        self._pending_event_monitor_stop = threading.Event()
+        self._pending_event_monitor_thread = threading.Thread(
+            target=self._pending_event_monitor_loop,
+            name="nba-pending-event-monitor",
+            daemon=True,
+        )
+        self._pending_event_monitor_thread.start()
+
+    @staticmethod
+    def _format_pending_event(event):
+        home = event.get('home') or event.get('mhn') or '?'
+        away = event.get('away') or event.get('man') or '?'
+        event_id = event.get('mid') or event.get('event_id') or '?'
+        start = event.get('mgt') or event.get('start_time_ms') or event.get('time') or '?'
+        league = event.get('tnjc') or event.get('league') or 'NBA'
+        return f"{league} | {home} vs {away} | event_id={event_id} | start={start}"
+
+    def _set_pending_event_snapshot(self, venue, events):
+        with self._pending_event_snapshot_lock:
+            self._pending_event_snapshots[venue] = [
+                self._format_pending_event(event) for event in events
+            ]
+
+    def _pending_event_monitor_loop(self):
+        while not self._pending_event_monitor_stop.wait(600):
+            with self._pending_event_snapshot_lock:
+                snapshots = {
+                    venue: list(rows) if rows is not None else None
+                    for venue, rows in self._pending_event_snapshots.items()
+                }
+            for venue, label in (("EB", "【EB】"), ("PINGBO", "【pingBo】")):
+                rows = snapshots.get(venue)
+                if rows is None:
+                    continue
+                print(f"{label}[待匹配赛事｜10分钟定时输出] 数量={len(rows)}", flush=True)
+                if not rows:
+                    print(f"{label}[待匹配赛事] 当前没有已获取的 NBA 赛事。", flush=True)
+                else:
+                    for index, row in enumerate(rows, 1):
+                        print(f"{label}[待匹配赛事] {index}/{len(rows)} {row}", flush=True)
 
     @staticmethod
     def _prompt_site_url(label):
@@ -444,6 +487,7 @@ class BrowserSessionBridge:
                 return
             payload = live.unwrap(payload)
             events = mapper.extract_pingbo_events(payload)
+            self._set_pending_event_snapshot("PINGBO", events)
             root = payload.get("data") if isinstance(payload, dict) and "data" in payload else payload
             leagues = root.get("leagues", []) if isinstance(root, dict) else []
             raw_count = sum(len(x.get("events") or []) for x in leagues
@@ -463,6 +507,9 @@ class BrowserSessionBridge:
             print("【pingBo】[RESPONSE] decode_failed", f"error={type(exc).__name__}", flush=True)
 
     def __exit__(self, exc_type, exc, tb):
+        self._pending_event_monitor_stop.set()
+        if self._pending_event_monitor_thread.is_alive():
+            self._pending_event_monitor_thread.join(timeout=1.0)
         try:
             if exc_type is not None:
                 print("\\n检测过程中发生异常。浏览器暂时保持打开，便于检查页面；回到终端按 Enter 后关闭浏览器。")
@@ -1173,6 +1220,7 @@ class BrowserSessionBridge:
             event for event_id, event in rows_by_id.items()
             if event_id not in self._ignored_event_ids
         ]
+        self._set_pending_event_snapshot("EB", eligible_rows)
         if self._ignored_event_ids:
             print(
                 "[EVENT_LIMIT_FILTER]",
