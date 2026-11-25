@@ -637,8 +637,8 @@ def _write_selection_file(selection, output_path):
     return output_path
 
 
-def auto_run_once(browser_session, stake, timeout, output_path):
-    """Discover live NBA totals, rank fresh cross-book opportunities, and submit at most one."""
+def auto_run_once(browser_session, stake, timeout, output_path, candidates=None):
+    """Run one sequential round: one event at a time, one market line at a time."""
     successful_counts = _successful_bet_counts()
     ignored_event_ids = {
         event_id for event_id, count in successful_counts.items()
@@ -653,94 +653,160 @@ def auto_run_once(browser_session, stake, timeout, output_path):
             "count_basis=confirmed_success_only",
             flush=True,
         )
-    candidates = browser_session.discover_nba_total_selections()
+
+    if candidates is None:
+        candidates = browser_session.discover_nba_total_selections()
     if not candidates:
-        raise RuntimeError("没有发现可用的 NBA 全场大小分候选；本轮未提交")
-    groups = {}
+        print("[ROUND_EMPTY] no eligible full-game totals selections", flush=True)
+        return []
+
+    # Preserve event order from EB and process each event fully before moving on.
+    events = {}
     for candidate in candidates:
-        key = (str(candidate["event"].get("mid")), str(candidate["group"].get("hv")))
-        groups.setdefault(key, candidate)
+        event_id = str(candidate["event"].get("mid"))
+        if event_id in ignored_event_ids:
+            continue
+        events.setdefault(event_id, [])
+        events[event_id].append(candidate)
 
-    eligible = []
-    rejected = []
-    for key, probe in groups.items():
-        try:
-            cross = refresh_and_validate_cross_odds(
-                lambda p=probe: browser_session.refresh_cross_odds(p), max_seconds=5.0
-            )
-            side = cross["direction"].lower()
-            matching = next((
-                item for item in candidates
-                if (str(item["event"].get("mid")), str(item["group"].get("hv"))) == key
-                and str(item["option"].get("ot") or "").lower() == side
-            ), None)
-            if matching is None:
-                rejected.append({"event_id": key[0], "line": key[1], "reason": "方向没有对应的实时 EB 选项"})
-                continue
-            passed_sum = Decimal(cross["a_reciprocal_sum"] if side == "under"
-                                 else cross["b_reciprocal_sum"])
-            margin = Decimal(cross["threshold"]) - passed_sum
-            eligible.append((margin, matching, cross))
-        except Exception as exc:
-            rejected.append({
-                "event_id": key[0], "line": key[1],
-                "reason": f"{type(exc).__name__}: {str(exc)[:240]}",
-            })
-
-    if not eligible:
-        print(json.dumps({
-            "mode": "AUTO_RUN_NO_QUALIFIED_EDGE",
-            "discovered_candidates": len(candidates),
-            "checked_event_lines": len(groups),
-            "rejected": rejected,
-            "submitted": False,
-        }, ensure_ascii=False, indent=2))
-        return None
-
-    # Highest reciprocal-sum margin first; submit no more than one candidate this run.
-    eligible.sort(key=lambda item: item[0], reverse=True)
-    for margin, candidate, cross in eligible:
-        selection = _selection_with_runtime(candidate)
-        saved_path = _write_selection_file(selection, output_path)
-        print(
-            "[AUTO_SELECTED]",
-            f"event_id={selection['event'].get('mid')}",
-            f"line={selection['group'].get('hv')}",
-            f"side={selection['option'].get('ot')}",
-            f"edge_margin={margin}",
-            f"input={saved_path}",
-            flush=True,
-        )
-        try:
-            result = submit_test_bet(
-                selection, stake, timeout,
-                cross_odds_refresh=lambda s=selection: browser_session.refresh_cross_odds(s),
-                browser_session=browser_session,
-            )
-            result["input_file"] = str(saved_path)
-            result["auto_run"] = True
-            return result
-        except Exception as exc:
-            # Do not try a second candidate after an uncertain POST outcome.
-            message = str(exc)
-            if "outcome is uncertain" in message or "duplicate candidate" in message:
-                raise
-            rejected.append({
-                "event_id": str(selection["event"].get("mid")),
-                "line": str(selection["group"].get("hv")),
-                "reason": f"submission precheck: {type(exc).__name__}: {message[:240]}",
-            })
-            # Continue only when the previous candidate was stopped before POST.
+    round_results = []
+    for event_id, event_candidates in events.items():
+        current_counts = _successful_bet_counts()
+        if current_counts.get(event_id, 0) >= MAX_SUCCESSFUL_BETS_PER_EVENT:
+            print("[EVENT_SKIPPED_LIMIT]", f"event_id={event_id}", flush=True)
             continue
 
-    print(json.dumps({
-        "mode": "AUTO_RUN_NO_ORDER_ACCEPTED",
-        "discovered_candidates": len(candidates),
-        "checked_event_lines": len(groups),
-        "rejected": rejected,
-        "submitted": False,
-    }, ensure_ascii=False, indent=2))
-    return None
+        # Each EB full-game total line is checked sequentially; no cross-event batching.
+        groups = {}
+        for candidate in event_candidates:
+            group_key = (
+                str(candidate["market"].get("hpid")),
+                str(candidate["group"].get("hid")),
+                str(candidate["group"].get("hv")),
+            )
+            groups.setdefault(group_key, candidate)
+
+        print(
+            "[EVENT_ROUND_START]",
+            f"event_id={event_id}",
+            f"total_lines={len(groups)}",
+            flush=True,
+        )
+        for group_key, probe in groups.items():
+            current_counts = _successful_bet_counts()
+            if current_counts.get(event_id, 0) >= MAX_SUCCESSFUL_BETS_PER_EVENT:
+                browser_session.set_ignored_event_ids(
+                    set(ignored_event_ids) | {event_id}
+                )
+                print(
+                    "[EVENT_LIMIT_REACHED]",
+                    f"event_id={event_id}",
+                    f"successful_bets={current_counts.get(event_id, 0)}",
+                    flush=True,
+                )
+                break
+
+            line = group_key[2]
+            try:
+                first_cross = refresh_and_validate_cross_odds(
+                    lambda p=probe: browser_session.refresh_cross_odds(p),
+                    max_seconds=5.0,
+                )
+                first_side = first_cross["direction"].lower()
+                first_candidate = next((
+                    item for item in event_candidates
+                    if str(item["market"].get("hpid")) == group_key[0]
+                    and str(item["group"].get("hid")) == group_key[1]
+                    and str(item["option"].get("ot") or "").lower() == first_side
+                ), None)
+                if first_candidate is None:
+                    print(
+                        "[LINE_REJECTED]",
+                        f"event_id={event_id}", f"line={line}",
+                        "reason=no_live_option_for_first_direction",
+                        flush=True,
+                    )
+                    continue
+
+                print(
+                    "[LINE_FIRST_CHECK_PASSED]",
+                    f"event_id={event_id}", f"line={line}",
+                    f"direction={first_side}",
+                    "recheck_in_seconds=5",
+                    flush=True,
+                )
+                time.sleep(5)
+
+                # The second comparison must independently pass before any order is built.
+                second_cross = refresh_and_validate_cross_odds(
+                    lambda p=first_candidate: browser_session.refresh_cross_odds(p),
+                    max_seconds=5.0,
+                )
+                second_side = second_cross["direction"].lower()
+                candidate = next((
+                    item for item in event_candidates
+                    if str(item["market"].get("hpid")) == group_key[0]
+                    and str(item["group"].get("hid")) == group_key[1]
+                    and str(item["option"].get("ot") or "").lower() == second_side
+                ), None)
+                if candidate is None:
+                    print(
+                        "[LINE_REJECTED]",
+                        f"event_id={event_id}", f"line={line}",
+                        "reason=no_live_option_for_second_direction",
+                        flush=True,
+                    )
+                    continue
+
+                selection = _selection_with_runtime(candidate)
+                saved_path = _write_selection_file(selection, output_path)
+                print(
+                    "[LINE_SECOND_CHECK_PASSED]",
+                    f"event_id={event_id}",
+                    f"line={line}",
+                    f"direction={second_side}",
+                    f"input={saved_path}",
+                    flush=True,
+                )
+                result = submit_test_bet(
+                    selection, stake, timeout,
+                    cross_odds_refresh=lambda s=selection: browser_session.refresh_cross_odds(s),
+                    browser_session=browser_session,
+                )
+                result["input_file"] = str(saved_path)
+                result["auto_run"] = True
+                result["event_id"] = event_id
+                round_results.append(result)
+                print(
+                    "[AUTO_BET_ACCEPTED]",
+                    f"event_id={event_id}",
+                    f"line={line}",
+                    f"accepted_order_count={result.get('accepted_order_count')}",
+                    flush=True,
+                )
+
+            except Exception as exc:
+                message = str(exc)
+                if "outcome is uncertain" in message or "duplicate candidate" in message:
+                    raise
+                print(
+                    "[LINE_CHECK_OR_SUBMIT_REJECTED]",
+                    f"event_id={event_id}",
+                    f"line={line}",
+                    f"error={type(exc).__name__}: {message[:300]}",
+                    flush=True,
+                )
+                continue
+
+        print("[EVENT_ROUND_FINISHED]", f"event_id={event_id}", flush=True)
+
+    print(
+        "[ROUND_FINISHED]",
+        f"events_checked={len(events)}",
+        f"accepted_results={len(round_results)}",
+        flush=True,
+    )
+    return round_results
 
 
 def main():
@@ -766,9 +832,39 @@ def main():
         ))
         from op7_browser_session_bridge import BrowserSessionBridge
         with BrowserSessionBridge(profiles_dir=args.profiles_dir, timeout=args.timeout) as browser_session:
-            result = auto_run_once(browser_session, args.stake, args.timeout, args.output or "./selections.json")
-        if result is not None:
-            print(json.dumps(result, ensure_ascii=False, indent=2))
+            # Capture the day's event/market structure once. Each round then refreshes
+            # odds sequentially, one event and one full-game total line at a time.
+            candidates = browser_session.discover_nba_total_selections()
+            if not candidates:
+                raise RuntimeError("没有发现可用的 NBA 全场大小分候选")
+            round_no = 0
+            while True:
+                round_no += 1
+                print(
+                    "\\n[ROUND_START]",
+                    f"round={round_no}",
+                    f"candidate_rows={len(candidates)}",
+                    flush=True,
+                )
+                try:
+                    results = auto_run_once(
+                        browser_session, args.stake, args.timeout,
+                        args.output or "./selections.json",
+                        candidates=candidates,
+                    )
+                    if results:
+                        print(json.dumps(results, ensure_ascii=False, indent=2))
+                except KeyboardInterrupt:
+                    raise
+                except Exception as exc:
+                    print(
+                        "[ROUND_ERROR]",
+                        f"round={round_no}",
+                        f"error={type(exc).__name__}: {str(exc)[:400]}",
+                        flush=True,
+                    )
+                print("[ROUND_COOLDOWN] seconds=120", flush=True)
+                time.sleep(120)
         return
     if args.discover_nba:
         if args.input or args.submit_test:
