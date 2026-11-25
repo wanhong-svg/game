@@ -754,7 +754,8 @@ def auto_run_once(browser_session, stake, timeout, output_path, candidates=None)
                 ), None)
                 if candidate is None:
                     continue
-                print("[盘口匹配成功]", f"赛事={matchup}", f"全场大小={line}", f"方向={second_side}", flush=True)
+                for success_log_index in range(1, 6):
+                    print("[盘口匹配成功]", f"第{success_log_index}/5次", f"赛事={matchup}", f"全场大小={line}", f"方向={second_side}", flush=True)
                 print("[执行节点]", "二次校验通过，正在读取最新投注限额并组装投注参数。", flush=True)
                 selection = _selection_with_runtime(candidate)
                 saved_path = _write_selection_file(selection, output_path)
