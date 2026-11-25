@@ -215,10 +215,15 @@ def fb_events(payload):
  out=[]
  for x in rows if isinstance(rows,list) else []:
   if not isinstance(x,dict): continue
+  league_obj=x.get('lg') if isinstance(x.get('lg'),dict) else {}
+  league=mapper.first(league_obj,'na','nm','name') or x.get('leagueName') or x.get('league')
+  # Drop non-NBA and unclassified competitions before they enter the live cache.
+  if not mapper.is_nba_league(league): continue
   nm=str(x.get('nm') or '')
   parts=__import__('re').split(r'\s+vs\.?\s+',nm,maxsplit=1,flags=__import__('re').I)
   if len(parts)==2:
-   out.append({'id':str(x.get('id')),'home':parts[0].strip(),'away':parts[1].strip(),'name':nm,'raw_status_ms':x.get('ms'),'phase_pe':(x.get('mc') or {}).get('pe') if isinstance(x.get('mc'),dict) else None})
+   out.append({'id':str(x.get('id')),'home':parts[0].strip(),'away':parts[1].strip(),'name':nm,
+    'league':str(league),'raw_status_ms':x.get('ms'),'phase_pe':(x.get('mc') or {}).get('pe') if isinstance(x.get('mc'),dict) else None})
  return out
 
 def eb_events(payload):
@@ -343,7 +348,9 @@ def main():
     if tick-clocks['eb_list']>=a.eb_list_interval or not eb_list:
      try:
       res=request_json(opctx,SITES['EB_ORIGIN']+'/yewu11/v1/m/matchesPagePB','POST',oh,body=eb_body,timeout_ms=a.timeout*1000,family='eb')
-      eb_list=[x for x in eb_events(res) if 'nba' in str(x.get('league') or '').lower() or '美国职业篮球' in str(x.get('league') or '')]; save_latest(out,'EB_events',eb_list); clocks['eb_list']=time.monotonic()
+      eb_rows=eb_events(res)
+      eb_list=[x for x in eb_rows if mapper.is_nba_league(x.get('league'))]
+      save_latest(out,'EB_events',eb_list); clocks['eb_list']=time.monotonic()
       print(f'[{now()}] EB赛事列表刷新：{len(eb_list)}场')
      except Exception as e:
       save_failure(out,'EB_events',e); print(f'EB列表刷新失败：{type(e).__name__}: {e}',file=sys.stderr)
@@ -355,7 +362,10 @@ def main():
       pb_params=dict(pb_q); pb_params.setdefault('_',str(int(time.time()*1000)))
       res=request_json(pbctx,SITES['PINGBO_ORIGIN']+'/sports-service/sv/compact/events','GET',ph,params=pb_params,timeout_ms=a.timeout*1000,family='pingbo')
       fetched_at=now()
-      pb_list=mapper.extract_pingbo_events(res)
+      pb_rows=mapper.extract_pingbo_events(res)
+      # Unknown league labels are discarded too: only explicitly confirmed NBA
+      # events and their embedded markets may enter the monitoring pipeline.
+      pb_list=[event for event in pb_rows if mapper.is_nba_league(event.get('league'))]
       for event in pb_list: event['observed_at_utc']=fetched_at
       normalized=[{k:v for k,v in x.items() if not k.startswith('_')} for x in pb_list]
       pb_markets=[r for x in pb_list for r in mapper.flatten_pingbo_markets(x)]
