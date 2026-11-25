@@ -35,27 +35,38 @@ def headers_env(name):
  return {k:v for k,v in h.items() if isinstance(k,str) and isinstance(v,str) and k.lower() not in {'cookie','host','content-length','connection','transfer-encoding'}}
 
 def _decode_b64_gzip_json(value):
- """Decode an application-level Base64 + GZIP JSON payload, if present."""
+ """Clean and decode application-level Base64 + gzip/zlib JSON, if present."""
  if not isinstance(value,str): return value
  encoded=''.join(value.split()).replace('-','+').replace('_','/')
+ if not encoded: return value
  try:
   packed=base64.b64decode(encoded+'='*(-len(encoded)%4),validate=True)
-  if not (packed.startswith(b'\\x1f\\x8b') or packed.startswith(b'\\x78')):
-   return value
-  try: decoded=gzip.decompress(packed)
-  except OSError:
+ except Exception:
+  return value
+ try:
+  try:
+   decoded=gzip.decompress(packed)
+  except (OSError,EOFError):
    import zlib
    decoded=zlib.decompress(packed)
-  return json.loads(decoded.decode('utf-8'))
+  text=decoded.decode('utf-8')
+  try:
+   return json.loads(text)
+  except json.JSONDecodeError:
+   return json.loads(urllib.parse.unquote(text))
  except Exception:
+  # Leave ordinary strings untouched; callers can detect an undecoded
+  # Base64-looking payload and report a sanitized diagnostic.
   return value
 
 def unwrap(obj):
+ """Normalize an API envelope so its data field is decoded exactly once."""
  if isinstance(obj,str):
   return _decode_b64_gzip_json(obj)
  if isinstance(obj,dict) and isinstance(obj.get('data'),str):
-  decoded=_decode_b64_gzip_json(obj['data'])
-  if decoded is not obj['data']:
+  original=obj['data']
+  decoded=_decode_b64_gzip_json(original)
+  if decoded is not original:
    obj=dict(obj); obj['data']=decoded
  return obj
 
