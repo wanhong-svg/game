@@ -360,6 +360,18 @@ class BrowserSessionBridge:
             if parsed.path not in {"/sports-service/sv/mobile/odds-live",
                                    "/sports-service/sv/mobile/odds-today"}:
                 return
+            request = response.request
+            request_params = dict(parse_qsl(urlsplit(request.url).query, keep_blank_values=True))
+            if request.method == "POST" and request.post_data:
+                try:
+                    posted = request.post_data
+                    body_params = json.loads(posted) if posted.lstrip().startswith("{") else dict(parse_qsl(posted, keep_blank_values=True))
+                    if isinstance(body_params, dict):
+                        request_params.update({str(k): str(v) for k, v in body_params.items()})
+                except Exception:
+                    pass
+            if request_params.get("sportId") != "4" or request_params.get("leagueIds") != "487":
+                return
             try:
                 payload = json.loads(response.text())
             except Exception:
@@ -374,6 +386,7 @@ class BrowserSessionBridge:
             raw_count = sum(len(x.get("events") or []) for x in leagues
                             if isinstance(x, dict) and isinstance(x.get("events"), list)) if isinstance(leagues, list) else 0
             self._pingbo_feed_responses[parsed.path] = {
+                "request_params": request_params,
                 "payload": payload, "captured_at": time.time(),
                 "status": response.status, "event_count": len(events),
             }
@@ -1315,15 +1328,23 @@ class BrowserSessionBridge:
 
     def ensure_pingbo_live_capture(self):
         """Require a browser-observed odds-live request and NBA response before matching."""
-        path = "/sports-service/sv/mobile/odds-live"
-        req = live.CAPTURED_REQUESTS.get(("pingbo", path))
-        record = self._pingbo_feed_responses.get(path)
-        if req and record and record.get("event_count", 0) > 0:
+        paths = ("/sports-service/sv/mobile/odds-live",
+                 "/sports-service/sv/mobile/odds-today")
+        def valid_feed(path):
+            req = live.CAPTURED_REQUESTS.get(("pingbo", path))
+            record = self._pingbo_feed_responses.get(path)
+            return bool(req and record and record.get("event_count", 0) > 0
+                        and req.get("url") and record.get("request_params", {}).get("sportId") == "4"
+                        and record.get("request_params", {}).get("leagueIds") == "487")
+        valid_path = next((path for path in paths if valid_feed(path)), None)
+        if valid_path:
+            self._pingbo_active_feed_path = valid_path
             return
         _console_prompt(
-            "【页面操作｜Pingbo 接口初始化】尚未取得有效的 Pingbo odds-live 请求及 NBA 响应。"
-            "请在 Pingbo 浏览器进入篮球 NBA 赛事列表并手动刷新，等待赛事赔率加载完成；"
-            "然后回到终端按 Enter。脚本会重新捕获浏览器请求和响应，成功前不会继续赔率校验。"
+            "【页面操作｜Pingbo 接口初始化】尚未取得有效的 Pingbo NBA 数据。"
+            "监控接口为 odds-live 或 odds-today，且请求 parameters 必须同时包含 sportId=4、leagueIds=487。"
+            "请在 Pingbo 浏览器进入篮球 NBA 赛事列表并手动刷新，等待赛事数据加载完成；"
+            "然后回到终端按 Enter。脚本会重新捕获符合条件的请求和响应，成功前不会继续赔率校验。"
         )
         deadline = time.monotonic() + 20.0
         while time.monotonic() < deadline:
@@ -1332,14 +1353,16 @@ class BrowserSessionBridge:
                     page.wait_for_timeout(250)
                 except Exception:
                     pass
-            req = live.CAPTURED_REQUESTS.get(("pingbo", path))
-            record = self._pingbo_feed_responses.get(path)
-            if req and record and record.get("event_count", 0) > 0:
+            valid_path = next((candidate for candidate in paths if valid_feed(candidate)), None)
+            if valid_path:
                 break
-        if not req or not record or not record.get("event_count"):
-            raise RuntimeError("Pingbo odds-live 初始化失败：刷新后仍未捕获到包含 NBA 赛事的接口响应；停止本轮")
+        if not valid_path:
+            raise RuntimeError("Pingbo NBA 初始化失败：刷新后仍未捕获到 parameters 同时包含 sportId=4、leagueIds=487 的 odds-live/odds-today 有效赛事响应；停止本轮")
         self._pingbo_capture_confirmed = True
-        print("【pingBo】[INIT] odds-live 浏览器请求与 NBA 响应已捕获",
+        self._pingbo_active_feed_path = valid_path
+        record = self._pingbo_feed_responses[valid_path]
+        print("【pingBo】[INIT] NBA 接口请求与响应已捕获",
+              f"endpoint={valid_path.rsplit('/', 1)[-1]}",
               f"nba_event_count={record['event_count']}", flush=True)
 
     def refresh_cross_odds(self, selection):
@@ -1351,8 +1374,10 @@ class BrowserSessionBridge:
         eb_origin = live.CAPTURED_ORIGINS.get("eb", live.SITES["EB_ORIGIN"])
         pb_origin = live.CAPTURED_ORIGINS.get("pingbo", live.SITES["PINGBO_ORIGIN"])
         eb_path = "/yewu11/v1/m/matchDetail/getMatchOddsInfoPB"
-        pb_path = "/sports-service/sv/mobile/odds-live"
         self.ensure_pingbo_live_capture()
+        pb_path = getattr(self, "_pingbo_active_feed_path", None)
+        if pb_path not in ("/sports-service/sv/mobile/odds-live", "/sports-service/sv/mobile/odds-today"):
+            raise RuntimeError("Pingbo NBA feed path missing after initialization")
         started = time.monotonic()
         cfg_path = Path(__file__).with_name("refresh_config.json")
         cfg = json.loads(cfg_path.read_text(encoding="utf-8")) if cfg_path.exists() else {}
