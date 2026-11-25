@@ -388,7 +388,7 @@ class BrowserSessionBridge:
                 }
                 if not league_names or league_names != {"NBA"}:
                     continue
-                if not event.get("mid") or not isinstance(event.get("hps"), list):
+                if not event.get("mid"):
                     continue
                 rows_by_id[str(event["mid"])] = event
             if page_no >= total_pages:
