@@ -286,6 +286,37 @@ class BrowserSessionBridge:
         try:
             parsed = urlsplit(request.url)
             live.capture_request(request, "op7")
+            # Trace only the presence and paths of explicitly named runtime fields
+            # in OP7 request query/body data. Never log values, headers, cookies or URLs.
+            if parsed.path.startswith("/yewu11/"):
+                runtime_aliases = {
+                    "device_imei": {"deviceimei", "imei"},
+                    "cuid": {"cuid"},
+                    "match_type": {"matchtype"},
+                    "market_type_finally": {"markettypefinally"},
+                }
+                request_sources = [("query", dict(parse_qsl(parsed.query, keep_blank_values=True)))]
+                raw_runtime_body = getattr(request, "post_data", None)
+                if raw_runtime_body:
+                    try:
+                        runtime_body = json.loads(raw_runtime_body)
+                    except Exception:
+                        runtime_body = dict(parse_qsl(raw_runtime_body, keep_blank_values=True))
+                    request_sources.append(("body", runtime_body))
+                for field, entries in _walk_field_values(
+                    {"request": request_sources}, runtime_aliases
+                ).items():
+                    if entries:
+                        paths = sorted({where for _, where in entries})
+                        print(
+                            "[EB_REQUEST_RUNTIME_DIAG]",
+                            f"method={request.method}",
+                            f"path={parsed.path}",
+                            f"field={field}",
+                            "found=True",
+                            f"paths={json.dumps(paths, ensure_ascii=False)}",
+                            flush=True,
+                        )
             # Detail-page requests need their own sanitized trace. The generic
             # capture helper intentionally logs only the NBA list lifecycle,
             # so without this line an unseen detail request is indistinguishable
