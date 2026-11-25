@@ -149,6 +149,13 @@ class BrowserSessionBridge:
     def post_json(self, base_url, path, body, headers, timeout=15):
         url = base_url.rstrip("/") + path
         captured = live.CAPTURED_REQUESTS.get(("eb", path))
+        if captured is None:
+            # Reuse only in-memory dynamic EB headers from the authenticated browser session.
+            captured = next(
+                (value for (family, _path), value in reversed(list(live.CAPTURED_REQUESTS.items()))
+                 if family == "eb"),
+                None,
+            )
         req_headers = dict(captured.get("headers", {})) if captured else {}
         req_headers.update(headers or {})
         req_headers.setdefault("Accept", "application/json")
