@@ -180,7 +180,7 @@ def capture_request(request, family):
    state['captured']=captured
    state['method']=request.method
    print(
-    '[EB_CAPTURE_DEBUG]',
+    '【EB】[EB_CAPTURE_DEBUG]',
     f'family={family}',
     f'api_family={api_family}',
     f'method={request.method}',
