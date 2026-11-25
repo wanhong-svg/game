@@ -72,7 +72,12 @@ def persist_observed_endpoint(api_family, origin, host, path, resource_type=None
  discovered.sort(key=lambda x:(x.get('family',''),x.get('host',''),x.get('path','')))
  if api_family in ('fb','eb','pingbo','common'):
   api=config.setdefault('apis',{}).setdefault(api_family,{})
-  api['base_url']=origin
+  if api_family=='eb' and path.startswith('/yewu13/'):
+   api['bet_api_base_url']=origin
+  else:
+   api['base_url']=origin
+   if api_family=='eb' and path.startswith('/yewu11/'):
+    api['nba_read_base_url']=origin
   hosts=api.setdefault('hosts',[])
   if host not in hosts:
    hosts.append(host); hosts.sort()
@@ -106,7 +111,8 @@ def capture_request(request, family):
    and not k.lower().startswith('sec-')}
   CAPTURED_REQUESTS[key]={'method':request.method,'url':request.url,'headers':headers,'post_data':request.post_data}
   if api_family in ('fb','eb','pingbo','common'):
-   CAPTURED_ORIGINS[api_family]=origin
+   origin_key='eb_bet' if api_family=='eb' and p.path.startswith('/yewu13/') else api_family
+   CAPTURED_ORIGINS[origin_key]=origin
    api=ENDPOINTS.get('apis',{}).get(api_family,{})
    ALLOW[p.netloc]=set(api.get('read_paths',[]))
  except Exception as exc:
