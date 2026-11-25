@@ -295,16 +295,17 @@ class BrowserSessionBridge:
                     "match_type": {"matchtype"},
                     "market_type_finally": {"markettypefinally"},
                 }
-                request_sources = [("query", dict(parse_qsl(parsed.query, keep_blank_values=True)))]
+                request_payload = {
+                    "query": dict(parse_qsl(parsed.query, keep_blank_values=True))
+                }
                 raw_runtime_body = getattr(request, "post_data", None)
                 if raw_runtime_body:
                     try:
-                        runtime_body = json.loads(raw_runtime_body)
+                        request_payload["body"] = json.loads(raw_runtime_body)
                     except Exception:
-                        runtime_body = dict(parse_qsl(raw_runtime_body, keep_blank_values=True))
-                    request_sources.append(("body", runtime_body))
+                        request_payload["body"] = dict(parse_qsl(raw_runtime_body, keep_blank_values=True))
                 for field, entries in _walk_field_values(
-                    {"request": request_sources}, runtime_aliases
+                    request_payload, runtime_aliases
                 ).items():
                     if entries:
                         paths = sorted({where for _, where in entries})
