@@ -430,12 +430,35 @@ def redact(value):
 
 def main():
     parser = argparse.ArgumentParser(description="Build or submit one local-test OP7/EB wager")
-    parser.add_argument("--input", required=True, help="local JSON with event/market/group/option fields")
+    parser.add_argument("--input", help="optional legacy JSON; omitted when using --discover-nba")
+    parser.add_argument("--discover-nba", action="store_true", help="read live EB NBA events/total markets; read-only, no order submission")
     parser.add_argument("--stake", default="100", help="fixed simulated test stake in yuan (default: 100)")
     parser.add_argument("--submit-test", action="store_true", help="send only after local-test guards pass")
     parser.add_argument("--timeout", type=int, default=15)
     parser.add_argument("--profiles-dir", default="browser_profiles")
     args = parser.parse_args()
+    if args.discover_nba:
+        if args.input or args.submit_test:
+            parser.error("--discover-nba is read-only and cannot be combined with --input or --submit-test")
+        from op7_browser_session_bridge import BrowserSessionBridge
+        with BrowserSessionBridge(profiles_dir=args.profiles_dir, timeout=args.timeout) as browser_session:
+            selections = browser_session.discover_nba_total_selections()
+            summary = [{
+                "event_id": str(s["event"]["mid"]),
+                "league": s["event"].get("tn"),
+                "home": s["event"].get("mhn"),
+                "away": s["event"].get("man"),
+                "start_time": s["event"].get("mgt"),
+                "line": s["group"].get("hv"),
+                "side": s["option"].get("ot"),
+                "odds_raw": s["option"].get("ov"),
+                "market_id": str(s["group"].get("hid")),
+                "option_id": str(s["option"].get("oid")),
+            } for s in selections]
+        print(json.dumps({"mode": "READ_ONLY_LIVE_NBA_DISCOVERY", "count": len(summary), "selections": summary}, ensure_ascii=False, indent=2))
+        return
+    if not args.input:
+        parser.error("请提供 --input，或使用 --discover-nba 执行实时 NBA 只读发现")
     selection = json.loads(Path(args.input).read_text(encoding="utf-8"))
     if args.submit_test:
         from op7_browser_session_bridge import BrowserSessionBridge
