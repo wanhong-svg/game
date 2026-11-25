@@ -194,6 +194,23 @@ def is_nba_league(value):
             label.startswith('美國職業籃球'))
 
 def _pingbo_participants(event):
+    """Return source participant names; prefer English names for matching, preserve Chinese labels."""
+    participants = event.get('participants') if isinstance(event,dict) else None
+    home = away = home_zh = away_zh = None
+    for person in participants if isinstance(participants,list) else []:
+        if not isinstance(person,dict): continue
+        kind=str(first(person,'type','participantType') or '').upper()
+        name=first(person,'englishName','name','shortName','nameEn')
+        name_zh=first(person,'chineseName','nameZh','zhName','cnName','shortNameZh','nameCn')
+        if kind in ('HOME','1'):
+            home=name or home
+            home_zh=name_zh or (name if name and re.search(r'[\\u3400-\\u9fff]',str(name)) else home_zh)
+        elif kind in ('AWAY','2'):
+            away=name or away
+            away_zh=name_zh or (name if name and re.search(r'[\\u3400-\\u9fff]',str(name)) else away_zh)
+    return home,away,home_zh,away_zh
+
+def _unused_old_pingbo_participants(event):
     participants = event.get('participants') if isinstance(event,dict) else None
     home = away = None
     for person in participants if isinstance(participants,list) else []:
@@ -220,11 +237,11 @@ def extract_pingbo_events(payload):
             if league_code!='nba': continue
             for event in league.get('events',[]) or []:
                 if not isinstance(event,dict): continue
-                home,away=_pingbo_participants(event)
+                home,away,home_zh,away_zh=_pingbo_participants(event)
                 event_id=first(event,'id','eventId')
                 if not event_id or not home or not away: continue
                 found.append({
-                    'venue':'PINGBO','event_id':str(event_id),'home':str(home),'away':str(away),
+                    'venue':'PINGBO','event_id':str(event_id),'home':str(home),'away':str(away),\n                    'home_zh':str(home_zh) if home_zh else None,'away_zh':str(away_zh) if away_zh else None,
                     'league':str(league_name),'league_code':league_code,
                     'sport':'Basketball','start_time_ms':first(event,'time','startTime','start_time'),
                     '_raw_event':event,'_raw_markets':event.get('periods',{})
