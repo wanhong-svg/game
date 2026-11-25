@@ -187,6 +187,8 @@ class BrowserSessionBridge:
         self.op7 = None
         self.pingbo = None
         self._detail_responses = {}
+        self._odds_responses = {}
+        self._odds_request_template = None
         self._list_responses = {}
         self._request_templates_by_id = {}
         self._request_templates_by_signature = {}
@@ -287,6 +289,26 @@ class BrowserSessionBridge:
             # capture helper intentionally logs only the NBA list lifecycle,
             # so without this line an unseen detail request is indistinguishable
             # from a click that emitted no API call.
+            if parsed.path == "/yewu11/v1/m/matchDetail/getMatchOddsInfoPB":
+                query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+                template = live.CAPTURED_REQUESTS.get(("eb", parsed.path))
+                if template and query.get("cuid") and query.get("mcid") is not None:
+                    self._odds_request_template = {
+                        "method": request.method,
+                        "url": request.url,
+                        "query": query,
+                        "captured_at_monotonic": template.get("captured_at_monotonic", time.monotonic()),
+                    }
+                print(
+                    "[EB_ODDS_REQUEST]",
+                    f"method={request.method}",
+                    f"path={parsed.path}",
+                    f"has_mid={bool(query.get('mid'))}",
+                    f"has_mcid={query.get('mcid') is not None}",
+                    f"has_cuid={bool(query.get('cuid'))}",
+                    f"captured={bool(self._odds_request_template)}",
+                    flush=True,
+                )
             if parsed.path.startswith("/yewu11/") and (
                 "detail" in parsed.path.lower() or "matchdetail" in parsed.path.lower()
             ):
@@ -322,8 +344,10 @@ class BrowserSessionBridge:
             parsed = urlsplit(response.url)
             if not parsed.path.startswith(("/yewu11/",)):
                 return
+            odds_path = "/yewu11/v1/m/matchDetail/getMatchOddsInfoPB"
             if not (parsed.path in live.EB_NBA_PAGE_ENDPOINTS
-                    or parsed.path.endswith("/getMatchDetailPB")):
+                    or parsed.path.endswith("/getMatchDetailPB")
+                    or parsed.path == odds_path):
                 return
 
             payload = _decode_api_response(response.text())
@@ -391,6 +415,17 @@ class BrowserSessionBridge:
                     flush=True,
                 )
 
+            if parsed.path == odds_path:
+                query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+                mid = str(query.get("mid") or "")
+                if mid:
+                    self._odds_responses[mid] = {
+                        "request": {"url_params": query},
+                        "response": payload,
+                        "captured_at": time.time(),
+                    }
+                return
+
             if not parsed.path.endswith("/getMatchDetailPB"):
                 return
             query = dict(parse_qsl(parsed.query, keep_blank_values=True))
@@ -444,6 +479,53 @@ class BrowserSessionBridge:
         }
         return payload
 
+    def fetch_match_odds(self, event):
+        """Fetch odds using the exact GET query template observed in the authenticated browser."""
+        mid = str(event.get("mid") or "").strip()
+        if not mid:
+            raise RuntimeError("NBA 赛事列表记录缺少 mid，无法请求盘口")
+        path = "/yewu11/v1/m/matchDetail/getMatchOddsInfoPB"
+        template = self._odds_request_template or live.CAPTURED_REQUESTS.get(("eb", path))
+        if not template:
+            raise RuntimeError(
+                "尚未捕获 getMatchOddsInfoPB 的真实浏览器请求；"
+                "请在 OP7 浏览器打开一场 NBA 赛事详情，确认盘口加载后回到终端重试"
+            )
+        query = dict(parse_qsl(urlsplit(template.get("url", "")).query, keep_blank_values=True))
+        if not query.get("mcid") or not query.get("cuid"):
+            raise RuntimeError(
+                "捕获到 getMatchOddsInfoPB 请求，但缺少 mcid 或 cuid；"
+                "请在已登录的 OP7 浏览器重新打开赛事详情并等待盘口加载"
+            )
+        query["mid"] = mid
+        origin = live.CAPTURED_ORIGINS.get("eb")
+        if not origin:
+            raise RuntimeError("尚未捕获 OP7 yewu11 API 来源，无法请求盘口")
+        response = live.request_json(
+            self.op7, origin + path, "GET",
+            live.headers_env("OP7_READONLY_HEADERS_JSON"),
+            params=query, timeout_ms=self.timeout * 1000, family="eb")
+        payload = _decode_api_response(response)
+        if not isinstance(payload, dict) or str(payload.get("code")) != "0000000":
+            code = payload.get("code") if isinstance(payload, dict) else "INVALID_RESPONSE"
+            raise RuntimeError(f"NBA 赛事 {mid} 盘口接口返回异常状态 code={code}")
+        self._odds_responses[mid] = {
+            "request": {"url_params": query},
+            "response": payload,
+            "captured_at": time.time(),
+        }
+        data = payload.get("data")
+        fields = sorted(str(key) for key in data.keys())[:50] if isinstance(data, dict) else []
+        print(
+            "[EB_ODDS_DECODE]",
+            f"mid={mid}",
+            f"data_type={type(data).__name__}",
+            f"data_fields={json.dumps(fields, ensure_ascii=False)}",
+            f"hps_count={len(self._detail_market_lists(data))}",
+            flush=True,
+        )
+        return payload
+
     @staticmethod
     def _detail_market_lists(value):
         """Find actual hps market arrays inside the decoded detail payload."""
@@ -470,10 +552,17 @@ class BrowserSessionBridge:
                 f"未捕获赛事 {event_id} 的 getMatchDetailPB 详情响应；"
                 "请在 OP7 检测界面打开该场 NBA 赛事详情后重试"
             )
-        return _resolve_runtime_fields(
-            [("detail_request", record["request"]), ("detail_response", record["response"])],
-            event_id, market=market, group=group,
-        )
+        odds_record = self._odds_responses.get(str(event_id))
+        sources = [
+            ("detail_request", record["request"]),
+            ("detail_response", record["response"]),
+        ]
+        if odds_record:
+            sources.extend([
+                ("odds_request", odds_record["request"]),
+                ("odds_response", odds_record["response"]),
+            ])
+        return _resolve_runtime_fields(sources, event_id, market=market, group=group)
 
     def discover_nba_events(self, max_pages=20):
         """Fetch current EB event pages and return only explicitly identified NBA events."""
@@ -685,6 +774,22 @@ class BrowserSessionBridge:
     def discover_nba_total_selections(self):
         """Discover NBA events and report safe schema diagnostics if totals cannot be resolved."""
         events = self.discover_nba_events()
+        if not events:
+            raise RuntimeError("当前列表没有筛选到 NBA 正规赛事，停止盘口请求")
+        if not self._odds_request_template:
+            input(
+                "请在 OP7 浏览器打开一场 NBA 正规赛事详情，并等待盘口赔率加载完成；"
+                "确认盘口已显示后回到终端按 Enter，脚本将复用捕获到的真实 mcid/cuid 参数："
+            )
+            for page in list(self.op7.pages):
+                try:
+                    page.wait_for_timeout(1000)
+                except Exception:
+                    pass
+        if not self._odds_request_template:
+            raise RuntimeError(
+                "未捕获 getMatchOddsInfoPB 真实请求；未使用固定 cuid，停止盘口发现"
+            )
         selections = []
         diagnostics = {
             "nba_events": len(events),
@@ -742,8 +847,9 @@ class BrowserSessionBridge:
 
             detail = self.fetch_match_detail(event)
             diagnostics["details_fetched"] += 1
-            detail_data = detail.get("data") if isinstance(detail, dict) else None
-            markets = self._detail_market_lists(detail_data)
+            odds = self.fetch_match_odds(event)
+            odds_data = odds.get("data") if isinstance(odds, dict) else None
+            markets = self._detail_market_lists(odds_data)
             if markets:
                 diagnostics["details_with_hps"] += 1
             diagnostics["markets_total"] += len(markets)
@@ -803,9 +909,9 @@ class BrowserSessionBridge:
             if not events:
                 reason = "没有从赛事列表筛选到 NBA 正规赛事；请核对赛事列表响应中的联赛字段"
             elif diagnostics["markets_total"] == 0:
-                reason = "详情响应中没有找到 hps 盘口数组"
+                reason = "getMatchOddsInfoPB 盘口响应中没有找到 hps 盘口数组"
             elif diagnostics["markets_hpid_38"] == 0:
-                reason = "详情中没有 hpid=38 的盘口；需要根据实际市场名称确认全场大小分对应的 hpid"
+                reason = "getMatchOddsInfoPB 响应中没有 hpid=38 的盘口；需要根据实际市场名称确认全场大小分对应的 hpid"
             elif diagnostics["over_under_options"] == 0:
                 reason = "hpid=38 盘口中没有 ot=over/under 的选项"
             else:
