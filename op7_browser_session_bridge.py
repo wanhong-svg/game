@@ -189,6 +189,7 @@ class BrowserSessionBridge:
         self._detail_responses = {}
         self._list_responses = {}
         self._request_templates_by_id = {}
+        self._request_templates_by_signature = {}
         self._nba_capture_started = 0.0
         self._attached_pages = {"op7": set(), "pingbo": set()}
 
@@ -288,7 +289,10 @@ class BrowserSessionBridge:
             }:
                 template = live.CAPTURED_REQUESTS.get(("eb", parsed.path))
                 if template:
-                    self._request_templates_by_id[id(request)] = dict(template)
+                    snapshot = dict(template)
+                    self._request_templates_by_id[id(request)] = snapshot
+                    signature = (request.url, request.method, request.post_data or "")
+                    self._request_templates_by_signature[signature] = snapshot
         except Exception as exc:
             print("[EB_CAPTURE_DEBUG] request_capture_failed", f"error={type(exc).__name__}", flush=True)
 
@@ -311,9 +315,15 @@ class BrowserSessionBridge:
                 "/yewu11/v1/m/matchesPagePB",
                 "/yewu11/v1/m/noLiveMatchesPagePB",
             }:
-                template = self._request_templates_by_id.get(id(response.request))
+                response_request = response.request
+                signature = (
+                    response_request.url,
+                    response_request.method,
+                    response_request.post_data or "",
+                )
+                template = self._request_templates_by_signature.get(signature)
                 if template is None:
-                    template = live.CAPTURED_REQUESTS.get(("eb", parsed.path))
+                    template = self._request_templates_by_id.get(id(response_request))
                 captured_at = (template or {}).get("captured_at_monotonic", 0.0)
                 if captured_at >= self._nba_capture_started > 0:
                     self._list_responses[parsed.path] = {
