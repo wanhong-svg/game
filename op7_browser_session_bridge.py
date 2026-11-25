@@ -156,7 +156,7 @@ def _resolve_runtime_fields(sources, event_id):
         if not distinct:
             raise RuntimeError(f"赛事 {event_id} 详情上下文缺少字段 {field}；拒绝使用默认值")
         if len(distinct) != 1:
-            origins = ", ".join(f"{value[:4]}…@{where}" for value, where in values)
+            origins = ", ".join(where for _, where in values)
             raise RuntimeError(f"赛事 {event_id} 字段 {field} 存在冲突来源：{origins}")
         resolved[field] = next(iter(distinct))
         resolved.setdefault("_sources", {})[field] = [where for _, where in values]
