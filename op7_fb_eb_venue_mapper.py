@@ -182,6 +182,50 @@ def flatten_eb_markets(data,precision=2,event_status_by_mid=None):
 
 def norm_team(s): return re.sub(r'[\s\u3000\-_.()（）\[\]【】]+','',str(s or '').strip().lower())
 
+NBA_TEAM_ALIASES = {
+    "ATL": {"canonical": "Atlanta Hawks", "zh_cn": "亚特兰大老鹰", "aliases": ["Atlanta Hawks","Atlanta","Hawks","ATL","亚特兰大老鹰","老鹰"]},
+    "BOS": {"canonical": "Boston Celtics", "zh_cn": "波士顿凯尔特人", "aliases": ["Boston Celtics","Boston","Celtics","BOS","波士顿凯尔特人","凯尔特人"]},
+    "BKN": {"canonical": "Brooklyn Nets", "zh_cn": "布鲁克林篮网", "aliases": ["Brooklyn Nets","Brooklyn","BK Nets","Nets","BKN","布鲁克林篮网","篮网"]},
+    "CHA": {"canonical": "Charlotte Hornets", "zh_cn": "夏洛特黄蜂", "aliases": ["Charlotte Hornets","Charlotte","Hornets","CHA","夏洛特黄蜂","黄蜂"]},
+    "CHI": {"canonical": "Chicago Bulls", "zh_cn": "芝加哥公牛", "aliases": ["Chicago Bulls","Chicago","Bulls","CHI","芝加哥公牛","公牛"]},
+    "CLE": {"canonical": "Cleveland Cavaliers", "zh_cn": "克利夫兰骑士", "aliases": ["Cleveland Cavaliers","Cleveland","Cavs","CLE","克利夫兰骑士","骑士"]},
+    "DAL": {"canonical": "Dallas Mavericks", "zh_cn": "达拉斯独行侠", "aliases": ["Dallas Mavericks","Dallas","Mavericks","Mavs","DAL","达拉斯独行侠","独行侠","达拉斯小牛","小牛"]},
+    "DEN": {"canonical": "Denver Nuggets", "zh_cn": "丹佛掘金", "aliases": ["Denver Nuggets","Denver","Nuggets","DEN","丹佛掘金","掘金"]},
+    "DET": {"canonical": "Detroit Pistons", "zh_cn": "底特律活塞", "aliases": ["Detroit Pistons","Detroit","Pistons","DET","底特律活塞","活塞"]},
+    "GSW": {"canonical": "Golden State Warriors", "zh_cn": "金州勇士", "aliases": ["Golden State Warriors","Golden State","GS Warriors","Warriors","GSW","金州勇士","勇士"]},
+    "HOU": {"canonical": "Houston Rockets", "zh_cn": "休斯敦火箭", "aliases": ["Houston Rockets","Houston","Rockets","HOU","休斯敦火箭","火箭"]},
+    "IND": {"canonical": "Indiana Pacers", "zh_cn": "印第安纳步行者", "aliases": ["Indiana Pacers","Indiana","Pacers","IND","印第安纳步行者","步行者"]},
+    "LAC": {"canonical": "Los Angeles Clippers", "zh_cn": "洛杉矶快船", "aliases": ["Los Angeles Clippers","LA Clippers","L.A. Clippers","Clippers","LAC","洛杉矶快船","快船"]},
+    "LAL": {"canonical": "Los Angeles Lakers", "zh_cn": "洛杉矶湖人", "aliases": ["Los Angeles Lakers","LA Lakers","L.A. Lakers","Lakers","LAL","洛杉矶湖人","湖人"]},
+    "MEM": {"canonical": "Memphis Grizzlies", "zh_cn": "孟菲斯灰熊", "aliases": ["Memphis Grizzlies","Memphis","Grizzlies","MEM","孟菲斯灰熊","灰熊"]},
+    "MIA": {"canonical": "Miami Heat", "zh_cn": "迈阿密热火", "aliases": ["Miami Heat","Miami","Heat","MIA","迈阿密热火","热火"]},
+    "MIL": {"canonical": "Milwaukee Bucks", "zh_cn": "密尔沃基雄鹿", "aliases": ["Milwaukee Bucks","Milwaukee","Bucks","MIL","密尔沃基雄鹿","雄鹿"]},
+    "MIN": {"canonical": "Minnesota Timberwolves", "zh_cn": "明尼苏达森林狼", "aliases": ["Minnesota Timberwolves","Minnesota","Timberwolves","Wolves","MIN","明尼苏达森林狼","森林狼"]},
+    "NOP": {"canonical": "New Orleans Pelicans", "zh_cn": "新奥尔良鹈鹕", "aliases": ["New Orleans Pelicans","New Orleans","Pelicans","NOP","新奥尔良鹈鹕","鹈鹕"]},
+    "NYK": {"canonical": "New York Knicks", "zh_cn": "纽约尼克斯", "aliases": ["New York Knicks","NY Knicks","Knicks","NYK","纽约尼克斯","尼克斯"]},
+    "OKC": {"canonical": "Oklahoma City Thunder", "zh_cn": "俄克拉荷马城雷霆", "aliases": ["Oklahoma City Thunder","Oklahoma City","OKC Thunder","Thunder","OKC","俄克拉荷马城雷霆","雷霆"]},
+    "ORL": {"canonical": "Orlando Magic", "zh_cn": "奥兰多魔术", "aliases": ["Orlando Magic","Orlando","Magic","ORL","奥兰多魔术","魔术"]},
+    "PHI": {"canonical": "Philadelphia 76ers", "zh_cn": "费城76人", "aliases": ["Philadelphia 76ers","Philadelphia","76ers","Sixers","PHI","费城76人","76人"]},
+    "PHX": {"canonical": "Phoenix Suns", "zh_cn": "菲尼克斯太阳", "aliases": ["Phoenix Suns","Phoenix","Suns","PHX","菲尼克斯太阳","太阳"]},
+    "POR": {"canonical": "Portland Trail Blazers", "zh_cn": "波特兰开拓者", "aliases": ["Portland Trail Blazers","Portland","Trail Blazers","Blazers","POR","波特兰开拓者","开拓者"]},
+    "SAC": {"canonical": "Sacramento Kings", "zh_cn": "萨克拉门托国王", "aliases": ["Sacramento Kings","Sacramento","Kings","SAC","萨克拉门托国王","国王"]},
+    "SAS": {"canonical": "San Antonio Spurs", "zh_cn": "圣安东尼奥马刺", "aliases": ["San Antonio Spurs","San Antonio","Spurs","SAS","圣安东尼奥马刺","马刺"]},
+    "TOR": {"canonical": "Toronto Raptors", "zh_cn": "多伦多猛龙", "aliases": ["Toronto Raptors","Toronto","Raptors","TOR","多伦多猛龙","猛龙"]},
+    "UTA": {"canonical": "Utah Jazz", "zh_cn": "犹他爵士", "aliases": ["Utah Jazz","Utah","Jazz","UTA","犹他爵士","爵士"]},
+    "WAS": {"canonical": "Washington Wizards", "zh_cn": "华盛顿奇才", "aliases": ["Washington Wizards","Washington","Wizards","WAS","华盛顿奇才","奇才"]},
+}
+
+NBA_TEAM_ALIAS_TO_ID = {
+    norm_team(alias): team_id
+    for team_id, team in NBA_TEAM_ALIASES.items()
+    for alias in team["aliases"]
+}
+
+def nba_team_id(value):
+    """Resolve an explicit NBA alias to its canonical three-letter team ID."""
+    return NBA_TEAM_ALIAS_TO_ID.get(norm_team(value))
+
+
 def is_nba_league(value):
     """Accept only explicitly identified NBA league labels; reject unknown competitions."""
     label=re.sub(r'[\s\u3000]+','',str(value or '').strip()).upper()
@@ -204,23 +248,11 @@ def _pingbo_participants(event):
         name_zh=first(person,'chineseName','nameZh','zhName','cnName','shortNameZh','nameCn')
         if kind in ('HOME','1'):
             home=name or home
-            home_zh=name_zh or (name if name and re.search(r'[\\u3400-\\u9fff]',str(name)) else home_zh)
+            home_zh=name_zh or (name if name and re.search(r'[\u3400-\u9fff]',str(name)) else home_zh)
         elif kind in ('AWAY','2'):
             away=name or away
-            away_zh=name_zh or (name if name and re.search(r'[\\u3400-\\u9fff]',str(name)) else away_zh)
+            away_zh=name_zh or (name if name and re.search(r'[\u3400-\u9fff]',str(name)) else away_zh)
     return home,away,home_zh,away_zh
-
-def _unused_old_pingbo_participants(event):
-    participants = event.get('participants') if isinstance(event,dict) else None
-    home = away = None
-    for person in participants if isinstance(participants,list) else []:
-        if not isinstance(person,dict): continue
-        kind=str(first(person,'type','participantType') or '').upper()
-        name=first(person,'name','englishName','shortName')
-        if not name: continue
-        if kind in ('HOME','1'): home=name
-        elif kind in ('AWAY','2'): away=name
-    return home,away
 
 def extract_pingbo_events(payload):
     """Parse the confirmed mobile odds-today/odds-live leagues[].events[] schema.
