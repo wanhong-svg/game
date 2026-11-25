@@ -34,7 +34,9 @@ def _heartbeat(stop_event):
     while not stop_event.wait(5):
         with _EXECUTION_STAGE_LOCK:
             stage = _EXECUTION_STAGE
-        print('[执行状态] 当前环节=' + stage, flush=True)
+        from op7_fb_eb_pingbo_live_refresh import USER_INPUT_WAITING
+        if not USER_INPUT_WAITING.is_set():
+            print('[执行状态] 当前环节=' + stage, flush=True)
 
 def load_runtime_endpoints():
     return json.loads(Path(__file__).with_name("endpoints.json").read_text(encoding="utf-8"))
