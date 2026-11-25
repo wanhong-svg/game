@@ -99,34 +99,19 @@ def _find_pingbo_totals(event, target_line):
 
 
 def _decode_api_response(raw):
-    """Match ob-decoder.html: Base64 then gzip/deflate, UTF-8 JSON, URI-decoded JSON fallback."""
+    """Use the shared response normalizer for raw JSON or Base64 + gzip/zlib envelopes."""
     if isinstance(raw, (bytes, bytearray)):
         raw = raw.decode("utf-8", "replace")
-    envelope = json.loads(raw) if isinstance(raw, str) else raw
-    if not isinstance(envelope, dict) or not isinstance(envelope.get("data"), str):
-        return envelope
-    import base64
-    import gzip
-    import zlib
-    import binascii
-    encoded = "".join(envelope["data"].split()).replace("-", "+").replace("_", "/")
     try:
-        packed = base64.b64decode(encoded + "=" * (-len(encoded) % 4), validate=True)
-        try:
-            decoded = gzip.decompress(packed)
-        except OSError:
-            decoded = zlib.decompress(packed)
-        decoded_text = decoded.decode("utf-8")
-        try:
-            payload = json.loads(decoded_text)
-        except json.JSONDecodeError:
-            payload = json.loads(unquote(decoded_text))
-    except (ValueError, OSError, zlib.error, UnicodeDecodeError, binascii.Error, json.JSONDecodeError):
-        raise RuntimeError("ob-decoder.html 解码规则执行失败：data 不是有效的 Base64 + GZIP/zlib JSON") from None
-    result = dict(envelope)
-    result["data"] = payload
-    return result
-
+        envelope = json.loads(raw) if isinstance(raw, str) else raw
+    except json.JSONDecodeError:
+        raise RuntimeError("EB 接口响应不是有效 JSON") from None
+    decoded = live.unwrap(envelope)
+    if isinstance(decoded, dict) and isinstance(decoded.get("data"), str):
+        value = decoded["data"].strip()
+        if value.startswith(("H4sI", "eJ", "eN")):
+            raise RuntimeError("EB 接口 data 字段疑似 Base64 压缩数据，但自动解码未成功")
+    return decoded
 
 def _walk_field_values(value, aliases, found=None, path="$"):
     found = found if found is not None else {name: [] for name in aliases}
@@ -288,11 +273,58 @@ class BrowserSessionBridge:
 
 
     def _capture_op7_response(self, response):
-        """Observe yewu11 JSON responses in memory; never persist request or response bodies."""
+        """Decode EB API responses as they arrive; retain only detail payloads in memory."""
         try:
             parsed = urlsplit(response.url)
-            if not parsed.path.startswith("/yewu11/v1/"):
+            if not parsed.path.startswith(("/yewu11/",)):
                 return
+            if not (parsed.path in live.EB_NBA_PAGE_ENDPOINTS
+                    or parsed.path.endswith("/getMatchDetailPB")):
+                return
+
+            payload = _decode_api_response(response.text())
+            data = payload.get("data") if isinstance(payload, dict) else payload
+            short_name = parsed.path.rsplit("/", 1)[-1]
+
+            # Page-list diagnostics deliberately expose only schema/counts, never raw rows.
+            if parsed.path.endswith("/matchesPagePB"):
+                rows = data.get("data") if isinstance(data, dict) else data
+                rows = rows if isinstance(rows, list) else []
+                nba_exact = 0
+                sport_counts = {}
+                for row in rows:
+                    if not isinstance(row, dict):
+                        continue
+                    sport_id = str(row.get("csid") or "<empty>")
+                    sport_counts[sport_id] = sport_counts.get(sport_id, 0) + 1
+                    leagues = {
+                        str(row.get(key) or "").strip().upper()
+                        for key in ("tn", "tnjc")
+                        if str(row.get(key) or "").strip()
+                    }
+                    if leagues == {"NBA"} and row.get("mid"):
+                        nba_exact += 1
+                print(
+                    "[EB_RESPONSE_DECODE]",
+                    f"path={short_name}",
+                    f"http={response.status}",
+                    f"data_type={type(data).__name__}",
+                    f"row_count={len(rows)}",
+                    f"exact_nba_rows={nba_exact}",
+                    f"csid_counts={json.dumps(sport_counts, ensure_ascii=False, sort_keys=True)}",
+                    flush=True,
+                )
+            else:
+                fields = sorted(str(key) for key in data.keys())[:40] if isinstance(data, dict) else []
+                print(
+                    "[EB_RESPONSE_DECODE]",
+                    f"path={short_name}",
+                    f"http={response.status}",
+                    f"data_type={type(data).__name__}",
+                    f"data_fields={json.dumps(fields, ensure_ascii=False)}",
+                    flush=True,
+                )
+
             if not parsed.path.endswith("/getMatchDetailPB"):
                 return
             query = dict(parse_qsl(parsed.query, keep_blank_values=True))
@@ -304,8 +336,6 @@ class BrowserSessionBridge:
                     request_payload["body"] = json.loads(raw_body)
                 except Exception:
                     request_payload["body"] = dict(parse_qsl(raw_body, keep_blank_values=True))
-            payload = _decode_api_response(response.text())
-            data = payload.get("data") if isinstance(payload, dict) else None
             mid = str(query.get("mid") or (request_payload.get("body") or {}).get("mid") or "")
             if not mid:
                 candidates = _walk_field_values(data, {"mid": {"mid"}})["mid"]
@@ -317,8 +347,13 @@ class BrowserSessionBridge:
                     "request": request_payload, "response": payload,
                     "captured_at": time.time(),
                 }
-        except Exception:
-            return
+        except Exception as exc:
+            # Do not print URLs, headers, request bodies, or response content.
+            print(
+                "[EB_RESPONSE_DECODE] response_parse_failed",
+                f"error={type(exc).__name__}",
+                flush=True,
+            )
 
     def fetch_match_detail(self, event):
         """Build a detail request from the live yewu11 template and the discovered event mid."""
