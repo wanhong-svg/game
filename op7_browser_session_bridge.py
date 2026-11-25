@@ -176,6 +176,7 @@ class BrowserSessionBridge:
         self.playwright = None
         self.op7 = None
         self.pingbo = None
+        self._detail_responses = {}
 
     @staticmethod
     def _prompt_site_url(label):
@@ -203,6 +204,8 @@ class BrowserSessionBridge:
         ):
             page = ctx.pages[0] if ctx.pages else ctx.new_page()
             page.on("request", lambda req, f=family: live.capture_request(req, f))
+            if family == "op7":
+                page.on("response", self._capture_op7_response)
             url = self._prompt_site_url(label)
             try:
                 page.goto(url, wait_until="domcontentloaded", timeout=self.timeout * 1000)
