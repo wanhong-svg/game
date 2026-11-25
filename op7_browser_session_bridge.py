@@ -70,7 +70,11 @@ def _find_pingbo_event(payload, event):
             continue
         candidates.append(item)
     if len(candidates) != 1:
-        raise RuntimeError(f"Pingbo event mapping is ambiguous: {len(candidates)} candidates")
+        raise RuntimeError(
+            f"Pingbo event mapping failed: candidates={len(candidates)}, "
+            f"target={event.get('home') or event.get('mhn')} vs {event.get('away') or event.get('man')}, "
+            f"pingbo_events={len(mapper.extract_pingbo_events(payload))}; check odds-live data and team/time fields"
+        )
     return candidates[0]
 
 
@@ -195,9 +199,13 @@ def _resolve_runtime_fields(sources, event_id, market=None, group=None):
 
 def _console_prompt(message):
     """Show required browser-operation prompts even while diagnostic stdout is suppressed."""
-    sys.__stdout__.write("\n" + str(message).strip() + "\n")
-    sys.__stdout__.flush()
-    return input()
+    live.USER_INPUT_WAITING.set()
+    try:
+        sys.__stdout__.write("\n" + str(message).strip() + "\n")
+        sys.__stdout__.flush()
+        return input()
+    finally:
+        live.USER_INPUT_WAITING.clear()
 
 
 def _console_stage(message):
@@ -261,6 +269,8 @@ class BrowserSessionBridge:
         self._nba_capture_confirmed = False
         self._attached_pages = {"op7": set(), "pingbo": set()}
         self._ignored_event_ids = set()
+        self._pingbo_feed_responses = {}
+        self._pingbo_capture_confirmed = False
 
     @staticmethod
     def _prompt_site_url(label):
@@ -337,6 +347,40 @@ class BrowserSessionBridge:
             page.on("response", self._capture_op7_response)
         else:
             page.on("request", lambda req, f=family: live.capture_request(req, f))
+            page.on("response", self._capture_pingbo_response)
+
+    def _capture_pingbo_response(self, response):
+        """Capture sanitized schema diagnostics for Pingbo mobile odds feeds."""
+        try:
+            parsed = urlsplit(response.url)
+            if parsed.path not in {"/sports-service/sv/mobile/odds-live",
+                                   "/sports-service/sv/mobile/odds-today"}:
+                return
+            try:
+                payload = json.loads(response.text())
+            except Exception:
+                print("[pingBo_RESPONSE] invalid_json",
+                      f"path={parsed.path.rsplit('/', 1)[-1]}",
+                      f"http={response.status}", flush=True)
+                return
+            payload = live.unwrap(payload)
+            events = mapper.extract_pingbo_events(payload)
+            root = payload.get("data") if isinstance(payload, dict) and "data" in payload else payload
+            leagues = root.get("leagues", []) if isinstance(root, dict) else []
+            raw_count = sum(len(x.get("events") or []) for x in leagues
+                            if isinstance(x, dict) and isinstance(x.get("events"), list)) if isinstance(leagues, list) else 0
+            self._pingbo_feed_responses[parsed.path] = {
+                "payload": payload, "captured_at": time.time(),
+                "status": response.status, "event_count": len(events),
+            }
+            print("[pingBo_RESPONSE]",
+                  f"path={parsed.path.rsplit('/', 1)[-1]}",
+                  f"http={response.status}",
+                  f"league_count={len(leagues) if isinstance(leagues, list) else 0}",
+                  f"raw_event_count={raw_count}",
+                  f"nba_event_count={len(events)}", flush=True)
+        except Exception as exc:
+            print("[pingBo_RESPONSE] decode_failed", f"error={type(exc).__name__}", flush=True)
 
     def __exit__(self, exc_type, exc, tb):
         try:
@@ -1262,6 +1306,35 @@ class BrowserSessionBridge:
         except Exception:
             raise RuntimeError(f"{path} returned non-JSON response") from None
 
+    def ensure_pingbo_live_capture(self):
+        """Require a browser-observed odds-live request and NBA response before matching."""
+        path = "/sports-service/sv/mobile/odds-live"
+        req = live.CAPTURED_REQUESTS.get(("pingbo", path))
+        record = self._pingbo_feed_responses.get(path)
+        if req and record and record.get("event_count", 0) > 0:
+            return
+        _console_prompt(
+            "【页面操作｜Pingbo 接口初始化】尚未取得有效的 Pingbo odds-live 请求及 NBA 响应。"
+            "请在 Pingbo 浏览器进入篮球 NBA 赛事列表并手动刷新，等待赛事赔率加载完成；"
+            "然后回到终端按 Enter。脚本会重新捕获浏览器请求和响应，成功前不会继续赔率校验。"
+        )
+        deadline = time.monotonic() + 20.0
+        while time.monotonic() < deadline:
+            for page in list(self.pingbo.pages):
+                try:
+                    page.wait_for_timeout(250)
+                except Exception:
+                    pass
+            req = live.CAPTURED_REQUESTS.get(("pingbo", path))
+            record = self._pingbo_feed_responses.get(path)
+            if req and record and record.get("event_count", 0) > 0:
+                break
+        if not req or not record or not record.get("event_count"):
+            raise RuntimeError("Pingbo odds-live 初始化失败：刷新后仍未捕获到包含 NBA 赛事的接口响应；停止本轮")
+        self._pingbo_capture_confirmed = True
+        print("[pingBo_INIT] odds-live 浏览器请求与 NBA 响应已捕获",
+              f"nba_event_count={record['event_count']}", flush=True)
+
     def refresh_cross_odds(self, selection):
         """Fetch both books in one synchronous window using the browser's logged-in sessions."""
         started = time.monotonic()
@@ -1272,20 +1345,42 @@ class BrowserSessionBridge:
         eb_origin = live.CAPTURED_ORIGINS.get("eb", live.SITES["EB_ORIGIN"])
         pb_origin = live.CAPTURED_ORIGINS.get("pingbo", live.SITES["PINGBO_ORIGIN"])
         eb_path = "/yewu11/v1/m/matchDetail/getMatchOddsInfoPB"
-        pb_path = "/sports-service/sv/compact/events"
+        pb_path = "/sports-service/sv/mobile/odds-live"
+        self.ensure_pingbo_live_capture()
         cfg_path = Path(__file__).with_name("refresh_config.json")
         cfg = json.loads(cfg_path.read_text(encoding="utf-8")) if cfg_path.exists() else {}
         eb_params = dict((cfg.get("op7") or {}).get("odds_params") or {})
         eb_params["mid"] = str(event["mid"])
-        pb_params = dict((cfg.get("part567") or {}).get("events_params") or {})
+        captured_pb = live.CAPTURED_REQUESTS.get(("pingbo", pb_path)) or {}
+        pb_query = dict(parse_qsl(urlsplit(captured_pb.get("url", "")).query, keep_blank_values=True))
+        pb_params = {
+            "sportId": pb_query.get("sportId", "4"),
+            "leagueIds": pb_query.get("leagueIds", "487"),
+            "periodNumber": pb_query.get("periodNumber", "0"),
+            "periodNumbers": pb_query.get("periodNumbers", "-1"),
+            "betTypes": pb_query.get("betTypes", "HDP,OU,ML_1X2"),
+            "resultingUnit": pb_query.get("resultingUnit", ""),
+            "locale": pb_query.get("locale", "zh_CN"),
+            "version": pb_query.get("version", "0"),
+            "specialName": pb_query.get("specialName", ""),
+            "_": str(int(time.time() * 1000)),
+            "withCredentials": pb_query.get("withCredentials", "true"),
+        }
+        print("[EB] 正在刷新当前赛事盘口赔率。", flush=True)
         eb = live.request_json(
             self.op7, eb_origin + eb_path, "GET",
             live.headers_env("OP7_READONLY_HEADERS_JSON"),
             params=eb_params, timeout_ms=self.timeout * 1000, family="eb")
+        print("[pingBo] 正在请求 mobile odds-live 并解析 NBA 赛事数据。", flush=True)
         pb = live.request_json(
             self.pingbo, pb_origin + pb_path, "GET",
             live.headers_env("PINGBO_READONLY_HEADERS_JSON"),
             params=pb_params, timeout_ms=self.timeout * 1000, family="pingbo")
+        pb = live.unwrap(pb)
+        pb_events = mapper.extract_pingbo_events(pb)
+        print("[pingBo] odds-live 响应解析完成", f"nba_event_count={len(pb_events)}", flush=True)
+        if not pb_events:
+            raise RuntimeError("Pingbo odds-live 响应中没有解析到 NBA 赛事；停止赛事映射")
         eb_totals = _find_eb_totals(eb, event["mid"], line)
         pb_event = _find_pingbo_event(pb, event)
         pb_totals = _find_pingbo_totals(pb_event, line)
