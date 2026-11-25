@@ -528,20 +528,37 @@ class BrowserSessionBridge:
 
     @staticmethod
     def _detail_market_lists(value):
-        """Find actual hps market arrays inside the decoded detail payload."""
+        """Find market records in decoded EB odds data, including direct market arrays."""
         found = []
-        seen = set()
+        seen_lists = set()
+        seen_markets = set()
+
+        def add_market(item):
+            if not isinstance(item, dict) or id(item) in seen_markets:
+                return
+            # Market identity is established by the documented display name and topKey,
+            # not by assuming the response always wraps records in an "hps" property.
+            if item.get("hpn") and (item.get("topKey") is not None or item.get("hpid") is not None):
+                seen_markets.add(id(item))
+                found.append(item)
+
         def walk(node):
             if isinstance(node, dict):
                 markets = node.get("hps")
-                if isinstance(markets, list) and id(markets) not in seen:
-                    seen.add(id(markets))
-                    found.extend(x for x in markets if isinstance(x, dict))
+                if isinstance(markets, list) and id(markets) not in seen_lists:
+                    seen_lists.add(id(markets))
+                    for item in markets:
+                        add_market(item)
+                add_market(node)
                 for child in node.values():
                     walk(child)
             elif isinstance(node, list):
+                if id(node) not in seen_lists:
+                    seen_lists.add(id(node))
                 for child in node:
+                    add_market(child)
                     walk(child)
+
         walk(value)
         return found
 
@@ -854,16 +871,22 @@ class BrowserSessionBridge:
                 diagnostics["details_with_hps"] += 1
             diagnostics["markets_total"] += len(markets)
             for market in markets:
-                hpid = str(market.get("hpid") or "")
-                diagnostics["market_ids"][hpid or "<empty>"] = (
-                    diagnostics["market_ids"].get(hpid or "<empty>", 0) + 1
+                top_key = str(market.get("topKey") or market.get("hpid") or "")
+                market_name = str(market.get("hpn") or "")
+                market_id = top_key or "<empty>"
+                diagnostics["market_ids"][market_id] = (
+                    diagnostics["market_ids"].get(market_id, 0) + 1
                 )
                 add_field_names("market_field_names", market)
                 if len(diagnostics["market_name_samples"]) < 12:
                     name = market.get("hpn") or market.get("name") or market.get("hn")
                     if name not in (None, ""):
                         diagnostics["market_name_samples"].append(str(name)[:100])
-                if hpid != "38":
+                target_market = (
+                    (market_name == "全场大小" and top_key == "38")
+                    or (market_name == "全场大小-附加盘" and top_key == "38-1")
+                )
+                if not target_market:
                     continue
                 diagnostics["markets_hpid_38"] += 1
                 for group in market.get("hl") or []:
@@ -909,9 +932,9 @@ class BrowserSessionBridge:
             if not events:
                 reason = "没有从赛事列表筛选到 NBA 正规赛事；请核对赛事列表响应中的联赛字段"
             elif diagnostics["markets_total"] == 0:
-                reason = "getMatchOddsInfoPB 盘口响应中没有找到 hps 盘口数组"
+                reason = "解码后的 getMatchOddsInfoPB 响应中没有识别到盘口记录（hpn/topKey）"
             elif diagnostics["markets_hpid_38"] == 0:
-                reason = "getMatchOddsInfoPB 响应中没有 hpid=38 的盘口；需要根据实际市场名称确认全场大小分对应的 hpid"
+                reason = "没有找到目标盘口：全场大小/topKey=38 或 全场大小-附加盘/topKey=38-1"
             elif diagnostics["over_under_options"] == 0:
                 reason = "hpid=38 盘口中没有 ot=over/under 的选项"
             else:
