@@ -2,22 +2,22 @@
   "mode": "read_only_auto_refresh",
   "intervals_seconds": {
     "FB_event_list": 30,
-    "FB_single_event_odds": 6,
+    "FB_single_event_odds": 20,
     "EB_event_list": 5,
-    "EB_single_event_odds": 5,
+    "EB_single_event_odds": 20,
     "Pingbo_event_list_and_embedded_odds": 20
   },
   "limits": {
     "FB_events_per_odds_cycle": 8,
     "EB_events_per_odds_cycle": 10,
-    "minimum_interval_seconds": 5
+    "minimum_interval_seconds": 20
   },
   "evidence": {
     "FB_event_list": "17 requests / 37.46s; gaps irregular; 30s is conservative initial setting, not a confirmed site cadence",
-    "FB_single_event_odds": "6 detail requests; median gap 3.84s; sample too small, 6s is provisional",
+    "FB_single_event_odds": "User policy: latest odds refresh every 20 seconds; cache stores only the latest record per event/market/selection.",
     "EB_event_list": "53 matchesPagePB requests; median gap 4.41s",
-    "EB_single_event_odds": "21 repeated event IDs; per-mid median polling interval 5.0s",
-    "Pingbo_event_list_and_embedded_odds": "active cluster median gap 20.9s; later long gaps likely page inactivity/navigation"
+    "EB_single_event_odds": "User policy: latest odds refresh every 20 seconds; cache stores only the latest record per event/market/selection.",
+    "Pingbo_event_list_and_embedded_odds": "User policy: latest event/embedded odds refresh every 20 seconds; totals line changes replace the previous line."
   },
   "network_allowlist": {
     "api.738z3.com": [
