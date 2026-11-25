@@ -218,12 +218,31 @@ class BrowserSessionBridge:
         (self.profiles_dir / "op7").mkdir(parents=True, exist_ok=True)
         (self.profiles_dir / "pingbo").mkdir(parents=True, exist_ok=True)
         self.playwright = sync_playwright().start()
+        # Launch both authenticated browser contexts in mobile/H5 emulation.
+        # DevTools opens automatically; Playwright's mobile emulation (viewport,
+        # mobile UA, touch and device scale factor) does not depend on manually
+        # toggling Chrome's device toolbar.
+        h5_options = {
+            "headless": False,
+            "viewport": {"width": 390, "height": 844},
+            "screen": {"width": 390, "height": 844},
+            "device_scale_factor": 3,
+            "is_mobile": True,
+            "has_touch": True,
+            "user_agent": (
+                "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
+            ),
+            "args": [
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--auto-open-devtools-for-tabs",
+            ],
+        }
         self.op7 = self.playwright.chromium.launch_persistent_context(
-            str(self.profiles_dir / "op7"), headless=False,
-            args=["--no-sandbox", "--disable-dev-shm-usage"])
+            str(self.profiles_dir / "op7"), **h5_options)
         self.pingbo = self.playwright.chromium.launch_persistent_context(
-            str(self.profiles_dir / "pingbo"), headless=False,
-            args=["--no-sandbox", "--disable-dev-shm-usage"])
+            str(self.profiles_dir / "pingbo"), **h5_options)
         for ctx, label, family in (
             (self.op7, "OP7", "op7"),
             (self.pingbo, "Pingbo", "pingbo"),
