@@ -36,7 +36,7 @@ def build_latest_market_request(selection):
         "matchInfoId": str(event["mid"]), "marketId": str(group["hid"]),
         "sportId": int(event["csid"]), "oddsId": str(option["oid"]),
         "oddsType": str(option["ot"]), "playId": str(market["hpid"]),
-        "placeNum": int(selection["place_num"]), "matchType": int(selection["match_type"])
+        "matchType": int(selection["match_type"])
     }], "cuid": str(selection["cuid"])}
 
 
@@ -52,7 +52,7 @@ def build_limit_request(selection, odds_value):
     }], "cuid": str(selection["cuid"])}
 
 
-def build_bet_payload(selection, stake, odds_value=None):
+def build_bet_payload(selection, stake, odds_value=None, latest_market=None):
     event, market, group, option = (selection[k] for k in ("event", "market", "group", "option"))
     amount = as_decimal(stake)
     if amount is None or amount <= 0:
@@ -75,7 +75,7 @@ def build_bet_payload(selection, stake, odds_value=None):
     detail = {
         "playId": str(market["hpid"]), "matchType": int(selection["match_type"]),
         "marketTypeFinally": str(selection["market_type_finally"]),
-        "playOptionsId": str(option["oid"]), "placeNum": int(selection["place_num"]),
+        "playOptionsId": str(option["oid"]),
         "betAmount": format(amount, "f"), "matchId": str(event["mid"]),
         "marketId": str(group["hid"]), "odds": raw_odds,
         "oddFinally": format(odds_decimal, "f"), "sportId": int(event["csid"]),
@@ -85,6 +85,21 @@ def build_bet_payload(selection, stake, odds_value=None):
         "marketValue": str(group.get("hv") or ""),
         "scoreBenchmark": str(selection.get("score_benchmark") or "")
     }
+    if not isinstance(latest_market, dict):
+        raise ValueError("queryLatestMarketInfo result is required to assemble the bet position field")
+    latest_place_num = latest_market.get("placeNum")
+    if latest_place_num not in (None, ""):
+        try:
+            detail["placeNum"] = int(latest_place_num)
+        except (TypeError, ValueError):
+            raise ValueError("queryLatestMarketInfo.placeNum is invalid; stopped before bet") from None
+    else:
+        latest_play_name = latest_market.get("playName")
+        if latest_play_name in (None, ""):
+            raise ValueError("queryLatestMarketInfo returned neither placeNum nor playName; stopped before bet")
+        # API schema fallback: when placeNum is absent, send playName instead.
+        detail["playName"] = str(latest_play_name)
+
     return {
         "useAcceptOdds": 1, "deviceType": int(selection.get("device_type", 2)),
         "deviceImei": str(selection["device_imei"]), "preBet": 0,
@@ -327,6 +342,10 @@ def submit_test_bet(selection, stake, timeout=15, cross_odds_refresh=None, brows
     latest = next((x for x in latest_rows if str(x.get("id")) == str(selection["group"]["hid"])), None)
     if latest is None:
         raise RuntimeError("selected market is no longer available; stopped before bet")
+    if str(latest.get("matchInfoId") or "") != str(selection["event"].get("mid")):
+        raise RuntimeError("queryLatestMarketInfo matchInfoId mismatch; stopped before bet")
+    if str(latest.get("playId") or latest.get("chpid") or "") != str(selection["market"].get("hpid")):
+        raise RuntimeError("queryLatestMarketInfo playId mismatch; stopped before bet")
     if latest.get("matchOver") not in (0, "0") or latest.get("matchStatus") not in (1, "1"):
         raise RuntimeError("match is over or not in an accepted state; stopped before bet")
     if latest.get("pendingOrderStatus") not in (1, "1"):
@@ -373,7 +392,7 @@ def submit_test_bet(selection, stake, timeout=15, cross_odds_refresh=None, brows
     if min_stake is None or amount < min_stake:
         raise RuntimeError("stake is below the confirmed minimum; stopped before bet")
 
-    payload = build_bet_payload(selection, amount, odds_value=odds_value)
+    payload = build_bet_payload(selection, amount, odds_value=odds_value, latest_market=latest)
     key = _candidate_key(selection)
     if ORDER_AUDIT_PATH.exists():
         try:
