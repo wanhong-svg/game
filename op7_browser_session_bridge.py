@@ -157,6 +157,7 @@ class BrowserSessionBridge:
     def discover_nba_events(self, max_pages=20):
         """Fetch current EB event pages and return only explicitly identified NBA events."""
         path = "/yewu11/v1/m/matchesPagePB"
+        input("请在已打开的 OP7 浏览器中手动进入「篮球 / NBA 正规赛事」列表，等待赛事加载完成后回到终端按 Enter：")
         template = live.CAPTURED_REQUESTS.get(("eb", path))
         if template is None:
             raise RuntimeError("未捕获 EB 赛事列表请求；请在 OP7 页面进入篮球/NBA赛事列表后重试")
