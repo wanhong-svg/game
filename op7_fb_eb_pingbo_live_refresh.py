@@ -74,10 +74,11 @@ def persist_observed_endpoint(api_family, origin, host, path, resource_type=None
   api=config.setdefault('apis',{}).setdefault(api_family,{})
   if api_family=='eb' and path.startswith('/yewu13/'):
    api['bet_api_base_url']=origin
+   api['base_url']=origin
+  elif api_family=='eb' and path.startswith('/yewu11/'):
+   api['nba_read_base_url']=origin
   else:
    api['base_url']=origin
-   if api_family=='eb' and path.startswith('/yewu11/'):
-    api['nba_read_base_url']=origin
   hosts=api.setdefault('hosts',[])
   if host not in hosts:
    hosts.append(host); hosts.sort()
