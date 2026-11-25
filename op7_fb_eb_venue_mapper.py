@@ -193,15 +193,54 @@ def is_nba_league(value):
             label.startswith('美国职业篮球') or
             label.startswith('美國職業籃球'))
 
+def _pingbo_participants(event):
+    participants = event.get('participants') if isinstance(event,dict) else None
+    home = away = None
+    for person in participants if isinstance(participants,list) else []:
+        if not isinstance(person,dict): continue
+        kind=str(first(person,'type','participantType') or '').upper()
+        name=first(person,'name','englishName','shortName')
+        if not name: continue
+        if kind in ('HOME','1'): home=name
+        elif kind in ('AWAY','2'): away=name
+    return home,away
+
 def extract_pingbo_events(payload):
+    """Parse the confirmed mobile odds-today/odds-live leagues[].events[] schema.
+    Legacy compact/events tuple parsing remains only as a compatibility fallback.
+    """
+    root=payload.get('data') if isinstance(payload,dict) and 'data' in payload else payload
     found=[]
+    leagues=root.get('leagues',[]) if isinstance(root,dict) else []
+    if isinstance(leagues,list):
+        for league in leagues:
+            if not isinstance(league,dict): continue
+            league_code=str(first(league,'leagueCode','code') or '').strip().lower()
+            league_name=first(league,'leagueName','name','leagueCode') or league_code
+            if league_code!='nba': continue
+            for event in league.get('events',[]) or []:
+                if not isinstance(event,dict): continue
+                home,away=_pingbo_participants(event)
+                event_id=first(event,'id','eventId')
+                if not event_id or not home or not away: continue
+                found.append({
+                    'venue':'PINGBO','event_id':str(event_id),'home':str(home),'away':str(away),
+                    'league':str(league_name),'league_code':league_code,
+                    'sport':'Basketball','start_time_ms':first(event,'time','startTime','start_time'),
+                    '_raw_event':event,'_raw_markets':event.get('periods',{})
+                })
+        unique={e['event_id']:e for e in found}
+        return list(unique.values())
+
+    # Older compact/events schema: retained only for other legacy monitor users.
+    legacy=[]
     league_keys=('league','leagueName','league_name','competition','competitionName',
                  'competition_name','tournament','tournamentName','tn','tnjc')
     def rec(x, context=None):
         context=dict(context or {})
         if isinstance(x,list):
             if len(x)>=9 and isinstance(x[1],str) and isinstance(x[2],str) and isinstance(x[8],dict):
-                found.append({'venue':'PINGBO','event_id':str(x[0]),'home':x[1],'away':x[2],
+                legacy.append({'venue':'PINGBO','event_id':str(x[0]),'home':x[1],'away':x[2],
                   'league':context.get('league'),'sport':context.get('sport'),
                   'raw_status':x[3] if len(x)>3 else None,'start_time_ms':x[4] if len(x)>4 else None,
                   'market_keys':sorted(x[8].keys()),'raw_tuple_length':len(x),'_raw_markets':x[8]})
@@ -211,52 +250,84 @@ def extract_pingbo_events(payload):
             for key in league_keys:
                 value=x.get(key)
                 if isinstance(value,(str,int,float)) and str(value).strip():
-                    context['league']=str(value)
-                    break
+                    context['league']=str(value); break
                 if isinstance(value,dict):
                     nested=first(value,'na','nm','name','leagueName')
-                    if nested not in (None,''):
-                        context['league']=str(nested)
-                        break
+                    if nested not in (None,''): context['league']=str(nested); break
             if not context.get('league'):
                 league_obj=x.get('lg') or x.get('leagueInfo') or x.get('league_info')
                 if isinstance(league_obj,dict):
                     nested=first(league_obj,'na','nm','name','leagueName')
-                    if nested not in (None,''):
-                        context['league']=str(nested)
+                    if nested not in (None,''): context['league']=str(nested)
             for key in ('sport','sportName','sport_name','csna'):
                 value=x.get(key)
                 if isinstance(value,(str,int,float)) and str(value).strip():
-                    context['sport']=str(value)
-                    break
+                    context['sport']=str(value); break
             for z in x.values():
                 if isinstance(z,(dict,list)): rec(z,context)
-    rec(payload)
-    unique={e['event_id']:e for e in found}
+    rec(root)
+    unique={e['event_id']:e for e in legacy}
     return list(unique.values())
 
+def _pingbo_decimal_odds(value):
+    """Convert American odds to decimal; preserve already-decimal values."""
+    value_dec=dec(value)
+    if value_dec is None or value_dec==0: return None
+    if value_dec>1: return value_dec
+    if value_dec<0: return Decimal('1')+(Decimal('100')/abs(value_dec))
+    return Decimal('1')+(value_dec/Decimal('100'))
+
 def flatten_pingbo_markets(event):
+    """Flatten full-game totals from mobile periods['0'].overUnder."""
+    raw_event=event.get('_raw_event') if isinstance(event,dict) else None
+    if isinstance(raw_event,dict):
+        normal=raw_event.get('normal') if isinstance(raw_event.get('normal'),dict) else raw_event
+        periods=normal.get('periods') if isinstance(normal,dict) else None
+        period=periods.get('0') if isinstance(periods,dict) else None
+        over_under=period.get('overUnder') if isinstance(period,dict) else None
+        rows=[]
+        if isinstance(over_under,dict): over_under=list(over_under.values())
+        for item in over_under if isinstance(over_under,list) else []:
+            if not isinstance(item,dict): continue
+            if item.get('offline') is True or item.get('unavailable') is True: continue
+            points=item.get('points')
+            over=_pingbo_decimal_odds(item.get('overOdds'))
+            under=_pingbo_decimal_odds(item.get('underOdds'))
+            for side,odds in (('over',over),('under',under)):
+                if odds is None or odds<=1: continue
+                rows.append({
+                    'venue':'PINGBO','event_id':str(event.get('event_id')),
+                    'market_key':'1','market_label':'全场大小',
+                    'side':side,'line':str(points) if points is not None else None,
+                    'decimal_odds':str(odds),'display_europe':trunc(odds,2),
+                    'selection_id':str(item.get('lineId')) if item.get('lineId') is not None else None,
+                    'line_id':item.get('lineId'),'is_alt':bool(item.get('isAlt',False)),
+                    'offline':item.get('offline',False),'unavailable':item.get('unavailable',False),
+                    'raw_american_odds':item.get('overOdds' if side=='over' else 'underOdds'),
+                    'observed_at_utc':event.get('observed_at_utc')
+                })
+        return rows
+
+    # Legacy compact/events tuple schema.
     rows=[]; markets=event.get('_raw_markets',{})
-    # Captured compact/events tuple: key 0 is handicap array; key 1 is totals array.
-    # Keep this as source-key mapping; no unsupported equivalence to FB/EB is inferred.
     for r in markets.get('0',[]) if isinstance(markets,dict) else []:
         if not isinstance(r,list) or len(r)<5: continue
         for side,idx,line_idx,odds_idx in [('home',0,2,3),('away',1,2,4)]:
-            odds=dec(r[odds_idx]);
+            odds=dec(r[odds_idx])
             if odds is None or odds<=1: continue
-            rows.append({'venue':'PINGBO','event_id':event['event_id'],'market_key':'0','market_label':'抓包结构key=0（历史脚本按让球解析）',
+            rows.append({'venue':'PINGBO','event_id':event['event_id'],'market_key':'0','market_label':'legacy handicap',
               'side':side,'line':r[line_idx],'signed_line':r[idx],'decimal_odds':str(odds),'display_europe':trunc(odds,2),
               'selection_id':r[7] if len(r)>7 else None,'raw_status_fields':r[5:7],
               'observed_at_utc':event.get('observed_at_utc')})
     for r in markets.get('1',[]) if isinstance(markets,dict) else []:
         if not isinstance(r,list) or len(r)<4: continue
         line=r[0]; total=dec(r[1]); over=dec(r[2]); under=dec(r[3])
-        # Keep source tuple indexes explicit; do not guess semantic meaning of index 1.
         for side,odds in [('over',over),('under',under)]:
             if odds is None or odds<=1: continue
-            rows.append({'venue':'PINGBO','event_id':event['event_id'],'market_key':'1','market_label':'抓包结构key=1（历史脚本按大小球解析）',
+            rows.append({'venue':'PINGBO','event_id':event['event_id'],'market_key':'1','market_label':'legacy totals',
               'side':side,'line':line,'line_numeric_source_index_1':str(total) if total is not None else None,
-              'decimal_odds':str(odds),'display_europe':trunc(odds,2),'selection_id':r[4] if len(r)>4 else None,'observed_at_utc':event.get('observed_at_utc')})
+              'decimal_odds':str(odds),'display_europe':trunc(odds,2),'selection_id':r[4] if len(r)>4 else None,
+              'observed_at_utc':event.get('observed_at_utc')})
     return rows
 
 def dedupe_markets(rows):
