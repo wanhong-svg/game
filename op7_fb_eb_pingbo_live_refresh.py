@@ -70,6 +70,15 @@ def persist_observed_endpoint(api_family, origin, host, path, resource_type=None
  else:
   discovered.append(entry)
  discovered.sort(key=lambda x:(x.get('family',''),x.get('host',''),x.get('path','')))
+ if api_family in ('fb','eb','pingbo','common'):
+  api=config.setdefault('apis',{}).setdefault(api_family,{})
+  api['base_url']=origin
+  hosts=api.setdefault('hosts',[])
+  if host not in hosts:
+   hosts.append(host); hosts.sort()
+  observed=api.setdefault('observed_paths',[])
+  if path not in observed:
+   observed.append(path); observed.sort()
  tmp=config_path.with_suffix('.json.tmp')
  tmp.write_text(json.dumps(config,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
  tmp.replace(config_path)
@@ -93,7 +102,7 @@ def capture_request(request, family):
   if p.path not in known_paths or request.method not in ('GET','POST'): return
   key=(api_family,p.path)
   headers={k:v for k,v in request.headers.items()
-   if k.lower() not in {'cookie','host','content-length','connection','accept-encoding','transfer-encoding','authorization'}
+   if k.lower() not in {'cookie','host','content-length','connection','accept-encoding','transfer-encoding'}
    and not k.lower().startswith('sec-')}
   CAPTURED_REQUESTS[key]={'method':request.method,'url':request.url,'headers':headers,'post_data':request.post_data}
   if api_family in ('fb','eb','pingbo','common'):
