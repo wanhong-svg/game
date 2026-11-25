@@ -34,7 +34,9 @@
         "api.r4bud5u7.com"
       ],
       "read_paths": [
+        "/yewu11/pub/v1/m/menu/initPB",
         "/yewu11/v1/m/matchesPagePB",
+        "/yewu11/v1/m/getFilterMatchListPB",
         "/yewu11/v1/m/matchDetail/getMatchOddsInfoPB",
         "/yewu11/v1/m/matchDetail/getMatchDetailPB",
         "/yewu11/v1/m/matchDetail/getESMatchDetailPB",
