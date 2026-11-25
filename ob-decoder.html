@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'none'; base-uri 'none'; form-action 'none'">
+<title>三方数据解码</title>
+<style>
+/* 【art】-沿用参考图的浅灰背景、白色输入区和蓝色主操作，窄屏保持可读。 */
+:root{color-scheme:light;--background:#f5f6f8;--surface:#fff;--text:#202124;--border:#ccd5e0;--primary:#1d80ff;--error:#b42318}
+*{box-sizing:border-box}body{margin:0;background:var(--background);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif}
+main{width:min(1240px,calc(100% - 64px));margin:52px auto 48px}h1{font-size:24px;margin:0 0 18px;line-height:1.4}textarea{display:block;width:100%;min-height:288px;padding:22px;border:1px solid var(--border);border-radius:15px;background:var(--surface);color:var(--text);resize:vertical;font:20px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace}textarea:focus{outline:2px solid var(--primary);outline-offset:2px}
+.actions{display:flex;align-items:center;gap:20px;margin:26px 0 34px}button{border:0;border-radius:15px;background:var(--primary);color:white;min-height:64px;padding:14px 36px;font:600 24px/1.5 inherit;font-family:inherit;font-size:24px;font-weight:600;cursor:pointer}button:hover{filter:brightness(.94)}button:focus-visible{outline:3px solid var(--text);outline-offset:3px}button:disabled{opacity:.6;cursor:wait}.hint{font-size:14px;line-height:1.6;color:#5e6673;margin:16px 0 0}#status{font-size:15px;line-height:1.5}pre{margin:0;min-height:144px;padding:28px;border:1px solid var(--border);border-radius:15px;background:var(--surface);white-space:pre-wrap;overflow-wrap:anywhere;font:17px/1.65 ui-monospace,SFMono-Regular,Consolas,monospace}.empty{font-family:inherit;font-size:22px}.error{color:var(--error)}
+@media(min-width:1600px){main{margin-left:8%;margin-right:auto}}@media(max-width:600px){main{width:calc(100% - 32px);margin-top:28px}textarea{min-height:240px;font-size:16px;padding:16px}pre{padding:18px;font-size:14px}.actions{gap:12px;margin:22px 0}button{font-size:20px;min-height:52px;padding:10px 28px}.empty{font-size:18px}}
+</style>
+</head>
+<body>
+<main>
+<h1><label for="input">解码</label></h1>
+<textarea id="input" placeholder="粘贴 H4sI... 开头的内容" spellcheck="false" aria-describedby="hint"></textarea>
+<p class="hint" id="hint">支持 Base64 + GZIP / zlib 数据，也可粘贴带 data 字段的响应 JSON。离线处理，不上传数据。建议使用新版 Chrome、Edge、Firefox 或 Safari。</p>
+<div class="actions"><button id="decode" type="button">解码</button><span id="status" role="status" aria-live="polite"></span></div>
+<pre id="output" class="empty" aria-label="解码结果" tabindex="0">解码结果会显示在这里</pre>
+</main>
+<script>
+'use strict';
+// 【art】-兼容直接复制的字符串、JSON 字符串以及 OB 外层响应，不猜测其他字段。
+function extractPayload(raw) {
+  const text = raw.trim();
+  if (!text) throw new Error('请先粘贴需要解码的数据。');
+  if (text.length > 8 * 1024 * 1024) throw new Error('输入过大，请控制在 8 MiB 以内。');
+  if (/^["{]/.test(text)) {
+    let parsed;
+    try { parsed = JSON.parse(text); } catch { throw new Error('输入的 JSON 格式不正确，请检查引号和转义字符。'); }
+    if (typeof parsed === 'string') return parsed;
+    if (parsed && typeof parsed.data === 'string') return parsed.data;
+    throw new Error('响应 JSON 的 data 字段必须是待解码的字符串。');
+  }
+  return text;
+}
+
+// 【art】-先清理复制产生的换行，再严格校验 Base64，避免把输入错误当成解压失败。
+function toBytes(payload) {
+  let text = payload.replace(/\\r\\n|\\n|\\r/g, '').replace(/\s/g, '').replace(/-/g, '+').replace(/_/g, '/');
+  if (!text || !/^[A-Za-z0-9+/]*={0,2}$/.test(text) || text.length % 4 === 1 || (text.includes('=') && text.length % 4 !== 0)) {
+    throw new Error('Base64 格式不正确，请粘贴完整数据。');
+  }
+  text = text.padEnd(Math.ceil(text.length / 4) * 4, '=');
+  try { return Uint8Array.from(atob(text), char => char.charCodeAt(0)); }
+  catch { throw new Error('Base64 解码失败，请检查内容是否完整。'); }
+}
+
+// 【art】-使用浏览器内置解压，无需 CDN；限制输出体积，避免大数据占满页面。
+async function decodePayload(raw) {
+  const bytes = toBytes(extractPayload(raw));
+  if (typeof DecompressionStream !== 'function') throw new Error('当前浏览器不支持离线解压，请使用新版 Chrome、Edge、Firefox 或 Safari。');
+  const format = bytes[0] === 0x1f && bytes[1] === 0x8b ? 'gzip' : 'deflate';
+  const chunks = [];
+  let total = 0;
+  try {
+    const reader = new Blob([bytes]).stream().pipeThrough(new DecompressionStream(format)).getReader();
+    try {
+      while (true) {
+        const {done, value} = await reader.read();
+        if (done) break;
+        total += value.length;
+        if (total > 32 * 1024 * 1024) { await reader.cancel(); throw new Error('解压结果超过 32 MiB，请拆分数据后再试。'); }
+        chunks.push(value);
+      }
+    } finally { reader.releaseLock(); }
+  } catch (error) {
+    if (error.message.includes('32 MiB')) throw error;
+    throw new Error('解压失败：数据可能不完整，或不是 GZIP / zlib 格式。');
+  }
+  const unpacked = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) { unpacked.set(chunk, offset); offset += chunk.length; }
+  let text;
+  try { text = new TextDecoder('utf-8', {fatal:true}).decode(unpacked); }
+  catch { throw new Error('解压成功，但结果不是有效的 UTF-8 文本。'); }
+  // 【art】-优先保留 JSON 中原本的百分号，仅在直接解析失败时兼容 v3 URI 编码。
+  try { return {text:JSON.stringify(JSON.parse(text), null, 2), json:true}; } catch {}
+  try { return {text:JSON.stringify(JSON.parse(decodeURIComponent(text)), null, 2), json:true}; } catch {}
+  return {text, json:false};
+}
+
+// 【art】-以纯文本展示结果，数据中的 HTML 不执行；失败时清除旧结果，避免误读。
+const input = document.getElementById('input');
+const button = document.getElementById('decode');
+const output = document.getElementById('output');
+const status = document.getElementById('status');
+button.addEventListener('click', async () => {
+  button.disabled = true;
+  button.textContent = '解码中…';
+  status.textContent = '';
+  status.className = '';
+  output.className = '';
+  output.textContent = '正在解码…';
+  try {
+    const result = await decodePayload(input.value);
+    output.textContent = result.text;
+    status.textContent = result.json ? '解码成功' : '解压成功，结果为普通文本';
+  } catch (error) {
+    output.textContent = error.message || '解码失败，请检查数据。';
+    output.className = 'error';
+    status.textContent = '解码失败';
+    status.className = 'error';
+  } finally {
+    button.disabled = false;
+    button.textContent = '解码';
+  }
+});
+</script>
+</body>
+</html>
