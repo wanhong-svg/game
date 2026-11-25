@@ -162,6 +162,11 @@ def _resolve_runtime_fields(sources, event_id, market=None, group=None):
             found = _walk_field_values(scan_payload, aliases)
             values.extend((value, f"{source_name}:{where}") for value, where in found[field])
         distinct = {value for value, _ in values}
+        if not distinct and field == "device_imei":
+            # Read-only NBA discovery does not need a device identifier.
+            # Keep it absent rather than inventing a value; any bet payload
+            # still requires an explicitly supplied local-session device_imei.
+            continue
         if not distinct:
             raise RuntimeError(f"赛事 {event_id} 详情上下文缺少字段 {field}；拒绝使用默认值")
         if len(distinct) != 1:
