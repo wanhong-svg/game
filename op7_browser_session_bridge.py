@@ -135,12 +135,22 @@ def _resolve_runtime_fields(sources, event_id, market=None, group=None):
         "match_type": {"matchtype"},
         "market_type_finally": {"markettypefinally"},
     }
+    # A captured manual bet request is the authoritative source for these
+    # four runtime fields. Do not mix values from read APIs/storage into it.
+    manual_sources = [
+        (source_name, payload)
+        for source_name, payload in sources
+        if source_name.startswith("manual_bet_request:")
+    ]
+    preferred_sources = manual_sources if manual_sources else sources
     resolved = {}
     for field in aliases:
         values = []
-        for source_name, payload in sources:
+        for source_name, payload in preferred_sources:
+            # Manual bet values are taken from the exact submitted request
+            # payload, without market-tree scoping or fallback to other APIs.
             scan_payload = payload
-            if field == "market_type_finally" and market is not None:
+            if not manual_sources and field == "market_type_finally" and market is not None:
                 scoped = []
                 market_hpid = str(market.get("hpid") or "")
                 group_hid = str((group or {}).get("hid") or "")
@@ -163,10 +173,16 @@ def _resolve_runtime_fields(sources, event_id, market=None, group=None):
             values.extend((value, f"{source_name}:{where}") for value, where in found[field])
         distinct = {value for value, _ in values}
         if not distinct:
+            if manual_sources:
+                raise RuntimeError(
+                    f"人工投注请求中缺少字段 {field}；"
+                    "本轮不会从详情接口、盘口接口或浏览器存储补值"
+                )
             raise RuntimeError(f"赛事 {event_id} 详情上下文缺少字段 {field}；拒绝使用默认值")
         if len(distinct) != 1:
             origins = ", ".join(where for _, where in values)
-            raise RuntimeError(f"赛事 {event_id} 字段 {field} 存在冲突来源：{origins}")
+            source_label = "人工投注请求" if manual_sources else "运行参数来源"
+            raise RuntimeError(f"赛事 {event_id} 的{source_label}字段 {field} 存在冲突：{origins}")
         resolved[field] = next(iter(distinct))
         resolved.setdefault("_sources", {})[field] = [where for _, where in values]
     resolved["_event_id"] = str(event_id)
@@ -175,7 +191,6 @@ def _resolve_runtime_fields(sources, event_id, market=None, group=None):
     if group is not None:
         resolved["_market_id"] = str(group.get("hid") or "")
     return resolved
-
 
 class BrowserSessionBridge:
     """Own both persistent browser contexts for one CLI execution."""
@@ -289,7 +304,7 @@ class BrowserSessionBridge:
             live.capture_request(request, "op7")
             # Observe the manual bet API request without modifying or aborting it.
             # Keep the parsed payload in memory only; never log field values or headers.
-            if parsed.path.startswith("/yewu13/") and (
+            if request.method.upper() == "POST" and parsed.path.startswith("/yewu13/") and (
                 parsed.path.endswith("/bet") or "/betOrder/client/bet" in parsed.path
             ):
                 bet_payload = {
