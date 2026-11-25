@@ -223,11 +223,20 @@ def _successful_bet_counts():
     records = payload.get("records") if isinstance(payload, dict) else None
     if not isinstance(records, list):
         raise RuntimeError("bet order audit file has invalid structure")
+    prepared_event_by_key = {
+        str(record.get("candidate_key")): str(record.get("event_id") or "").strip()
+        for record in records
+        if isinstance(record, dict) and record.get("state") == "PREPARED"
+        and record.get("candidate_key")
+    }
     counts = {}
     for record in records:
         if not isinstance(record, dict) or record.get("state") != "ACCEPTED":
             continue
-        event_id = str(record.get("event_id") or "").strip()
+        event_id = str(
+            record.get("event_id")
+            or prepared_event_by_key.get(str(record.get("candidate_key")), "")
+        ).strip()
         if event_id:
             counts[event_id] = counts.get(event_id, 0) + 1
     return counts
@@ -444,7 +453,8 @@ def submit_test_bet(selection, stake, timeout=15, cross_odds_refresh=None, brows
         })
         raise RuntimeError("bet POST outcome is uncertain; inspect the test account/order history before any retry") from None
     _write_order_audit({
-        "candidate_key": key, "state": "ACCEPTED",
+        "candidate_key": key, "event_id": str(selection["event"].get("mid")),
+        "state": "ACCEPTED",
         "updated_at_utc": datetime.now(timezone.utc).isoformat(),
         "orders": parsed_result["orders"],
         "bet_money_total_fen": parsed_result["bet_money_total_fen"],
