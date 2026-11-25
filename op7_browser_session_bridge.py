@@ -212,6 +212,7 @@ class BrowserSessionBridge:
         self._nba_capture_started = 0.0
         self._nba_list_template = None
         self._nba_list_path = None
+        self._nba_capture_confirmed = False
         self._attached_pages = {"op7": set(), "pingbo": set()}
         self._ignored_event_ids = set()
 
@@ -757,10 +758,12 @@ class BrowserSessionBridge:
             "/yewu11/v1/m/noLiveMatchesPagePB",
         )
         if not getattr(self, "_nba_list_template", None):
-            input(
-                "请先在 OP7 浏览器进入「篮球 / NBA 正规赛事」列表；"
-                "确认页面已打开后回到终端按 Enter，脚本随后开始捕获最新列表请求："
-            )
+            if not self._nba_capture_confirmed:
+                input(
+                    "请先在 OP7 浏览器进入「篮球 / NBA 正规赛事」列表；"
+                    "确认页面已打开后回到终端按 Enter，脚本随后开始捕获最新列表请求："
+                )
+            self._nba_capture_confirmed = False
     
             # Drain callbacks queued while input() blocked Playwright's event loop.
             for page in list(self.op7.pages):
