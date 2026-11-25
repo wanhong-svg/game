@@ -188,6 +188,7 @@ class BrowserSessionBridge:
         self.pingbo = None
         self._detail_responses = {}
         self._list_responses = {}
+        self._request_templates_by_id = {}
         self._nba_capture_started = 0.0
         self._attached_pages = {"op7": set(), "pingbo": set()}
 
@@ -253,9 +254,11 @@ class BrowserSessionBridge:
         if page in attached:
             return
         attached.add(page)
-        page.on("request", lambda req, f=family: live.capture_request(req, f))
         if family == "op7":
+            page.on("request", self._capture_op7_request)
             page.on("response", self._capture_op7_response)
+        else:
+            page.on("request", lambda req, f=family: live.capture_request(req, f))
 
     def __exit__(self, exc_type, exc, tb):
         try:
@@ -273,6 +276,21 @@ class BrowserSessionBridge:
             if self.playwright:
                 self.playwright.stop()
 
+
+    def _capture_op7_request(self, request):
+        """Capture allow-listed requests and bind their exact template to the request object."""
+        try:
+            parsed = urlsplit(request.url)
+            live.capture_request(request, "op7")
+            if parsed.path in {
+                "/yewu11/v1/m/matchesPagePB",
+                "/yewu11/v1/m/noLiveMatchesPagePB",
+            }:
+                template = live.CAPTURED_REQUESTS.get(("eb", parsed.path))
+                if template:
+                    self._request_templates_by_id[id(request)] = dict(template)
+        except Exception as exc:
+            print("[EB_CAPTURE_DEBUG] request_capture_failed", f"error={type(exc).__name__}", flush=True)
 
     def _capture_op7_response(self, response):
         """Decode EB API responses as they arrive; retain only detail payloads in memory."""
@@ -293,7 +311,9 @@ class BrowserSessionBridge:
                 "/yewu11/v1/m/matchesPagePB",
                 "/yewu11/v1/m/noLiveMatchesPagePB",
             }:
-                template = live.CAPTURED_REQUESTS.get(("eb", parsed.path))
+                template = self._request_templates_by_id.get(id(response.request))
+                if template is None:
+                    template = live.CAPTURED_REQUESTS.get(("eb", parsed.path))
                 captured_at = (template or {}).get("captured_at_monotonic", 0.0)
                 if captured_at >= self._nba_capture_started > 0:
                     self._list_responses[parsed.path] = {
