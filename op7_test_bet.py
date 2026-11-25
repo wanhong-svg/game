@@ -455,14 +455,17 @@ def main():
     parser.add_argument("--submit-test", action="store_true", help="send only after local-test guards pass")
     parser.add_argument("--timeout", type=int, default=15)
     parser.add_argument("--profiles-dir", default="browser_profiles")
+    parser.add_argument("--output", help="write one discovered live selection JSON to this path")
+    parser.add_argument("--selection-index", type=int, default=0, help="zero-based candidate index to write (default: 0)")
     args = parser.parse_args()
     if args.discover_nba:
         if args.input or args.submit_test:
-            parser.error("--discover-nba is read-only and cannot be combined with --input or --submit-test")
+            parser.error("--discover-nba only generates input data; run submission separately with --input and --submit-test")
         from op7_browser_session_bridge import BrowserSessionBridge
         with BrowserSessionBridge(profiles_dir=args.profiles_dir, timeout=args.timeout) as browser_session:
             selections = browser_session.discover_nba_total_selections()
             summary = [{
+                "index": index,
                 "event_id": str(s["event"]["mid"]),
                 "league": s["event"].get("tn"),
                 "home": s["event"].get("mhn"),
@@ -473,8 +476,39 @@ def main():
                 "odds_raw": s["option"].get("ov"),
                 "market_id": str(s["group"].get("hid")),
                 "option_id": str(s["option"].get("oid")),
-            } for s in selections]
-        print(json.dumps({"mode": "READ_ONLY_LIVE_NBA_DISCOVERY", "count": len(summary), "selections": summary}, ensure_ascii=False, indent=2))
+            } for index, s in enumerate(selections)]
+            if args.output:
+                if args.selection_index < 0 or args.selection_index >= len(selections):
+                    raise ValueError(
+                        f"--selection-index {args.selection_index} out of range; "
+                        f"valid range is 0..{len(selections) - 1}"
+                    )
+                selected = selections[args.selection_index]
+                runtime = selected["runtime_context"]
+                input_data = {
+                    "event": selected["event"],
+                    "market": selected["market"],
+                    "group": selected["group"],
+                    "option": selected["option"],
+                    "match_type": int(runtime["match_type"]),
+                    "cuid": str(runtime["cuid"]),
+                    "device_imei": str(runtime["device_imei"]),
+                    "market_type_finally": str(runtime["market_type_finally"]),
+                }
+                output_path = Path(args.output).expanduser()
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                temp_path = output_path.with_name(output_path.name + ".tmp")
+                temp_path.write_text(
+                    json.dumps(input_data, ensure_ascii=False, indent=2) + "\\n",
+                    encoding="utf-8",
+                )
+                temp_path.replace(output_path)
+                print(f"[INPUT_GENERATED] path={output_path} selection_index={args.selection_index}")
+        print(json.dumps({
+            "mode": "LIVE_NBA_DISCOVERY",
+            "count": len(summary),
+            "selections": summary,
+        }, ensure_ascii=False, indent=2))
         return
     if not args.input:
         parser.error("请提供 --input，或使用 --discover-nba 执行实时 NBA 只读发现")
