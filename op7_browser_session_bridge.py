@@ -518,28 +518,60 @@ class BrowserSessionBridge:
                 "candidate_event_rows": inspect_candidate_rows(data),
             })
             if isinstance(data, dict):
+                pages_value = data.get("pages")
                 try:
-                    total_pages = max(1, min(int(data.get("pages") or 1), int(max_pages)))
+                    total_pages = max(1, min(int(pages_value or 1), int(max_pages)))
                 except (TypeError, ValueError):
                     total_pages = 1
                 events = data.get("data") or []
             elif isinstance(data, list):
+                pages_value = 1
                 events = data
                 total_pages = 1
             else:
                 raise RuntimeError("EB 赛事列表响应结构无法识别；拒绝猜测赛事字段")
+            if not isinstance(events, list):
+                raise RuntimeError("EB 赛事列表 data 字段不是数组；拒绝猜测分页结构")
+
+            # Count every row on every fetched page; the eight sample rows above
+            # are illustrative only and must not be mistaken for the full result.
+            page_nba_exact = 0
+            page_nba_missing_mid = 0
+            page_csids = {}
+            page_leagues = {}
             for event in events:
-                if not isinstance(event, dict) or str(event.get("csid")) != "2":
+                if not isinstance(event, dict):
                     continue
+                csid = str(event.get("csid") or "<empty>")
+                page_csids[csid] = page_csids.get(csid, 0) + 1
+                tn = str(event.get("tn") or "").strip()
+                tnjc = str(event.get("tnjc") or "").strip()
+                league_key = f"tn={tn or '<empty>'} | tnjc={tnjc or '<empty>'}"
+                page_leagues[league_key] = page_leagues.get(league_key, 0) + 1
+
                 league_names = {
-                    str(event.get(k) or "").strip().upper()
-                    for k in ("tn", "tnjc") if str(event.get(k) or "").strip()
+                    value.upper() for value in (tn, tnjc) if value
                 }
-                if not league_names or league_names != {"NBA"}:
+                if str(event.get("csid")) != "2" or league_names != {"NBA"}:
                     continue
+                page_nba_exact += 1
                 if not event.get("mid"):
+                    page_nba_missing_mid += 1
                     continue
                 rows_by_id[str(event["mid"])] = event
+
+            print(
+                "[EB_NBA_PAGE_DIAG]",
+                f"page={page_no}",
+                f"rows={len(events)}",
+                f"pages_type={type(pages_value).__name__}",
+                f"pages_value={str(pages_value)[:80]}",
+                f"exact_nba_rows={page_nba_exact}",
+                f"nba_missing_mid={page_nba_missing_mid}",
+                f"csid_counts={json.dumps(page_csids, ensure_ascii=False, sort_keys=True)}",
+                f"league_counts={json.dumps(page_leagues, ensure_ascii=False, sort_keys=True)}",
+                flush=True,
+            )
             if page_no >= total_pages:
                 break
         if not rows_by_id:
