@@ -335,7 +335,7 @@ class BrowserSessionBridge:
             )
         return _resolve_runtime_fields(
             [("detail_request", record["request"]), ("detail_response", record["response"])],
-            event_id,
+            event_id, market=market, group=group,
         )
 
     def discover_nba_events(self, max_pages=20):
