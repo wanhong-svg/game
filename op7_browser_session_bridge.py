@@ -54,26 +54,77 @@ def _find_eb_totals(raw, event_id, line):
     return result
 
 
+def _event_progress_signature(event):
+    """Extract only explicit period, clock and score fields; never infer a live state."""
+    aliases = {
+        "period": {"period","quarter","currentperiod","currentquarter","periodname","quartername","stage"},
+        "clock": {"clock","gameclock","matchclock","remainingtime","timeremaining","livetime","matchtimeleft"},
+        "home_score": {"homescore","hometeamscore","scorehome"},
+        "away_score": {"awayscore","awayteamscore","scoreaway"},
+        "score": {"score","currentscore","gamescore","scoreboard"},
+    }
+    found = {k: [] for k in aliases}
+    def walk(node):
+        if isinstance(node, dict):
+            for key, value in node.items():
+                normalized = str(key).replace("_","").replace("-","").lower()
+                for name, keys in aliases.items():
+                    if normalized in keys and value not in (None,"") and not isinstance(value,(dict,list)):
+                        found[name].append(str(value).strip())
+                walk(value)
+        elif isinstance(node, list):
+            for value in node: walk(value)
+    walk(event)
+    result = {}
+    for key, values in found.items():
+        unique = list(dict.fromkeys(values))
+        if len(unique) > 1:
+            return None
+        if unique:
+            result[key] = unique[0]
+    if "score" not in result and {"home_score","away_score"} <= result.keys():
+        result["score"] = result["home_score"] + "-" + result["away_score"]
+    if not {"period","clock","score"} <= result.keys():
+        return None
+    return (result["period"].lower(), result["clock"].lower(), result["score"].lower())
+
+
 def _find_pingbo_event(payload, event):
-    target_home = mapper.norm_team(event.get("home") or event.get("mhn"))
-    target_away = mapper.norm_team(event.get("away") or event.get("man"))
+    eb_home_raw = str(event.get("home") or event.get("mhn") or "").strip()
+    eb_away_raw = str(event.get("away") or event.get("man") or "").strip()
+    eb_home_id, eb_away_id = mapper.nba_team_id(eb_home_raw), mapper.nba_team_id(eb_away_raw)
+    if not eb_home_id or not eb_away_id or eb_home_id == eb_away_id:
+        raise RuntimeError(f"EB 球队名称无法通过 NBA 官方别名字典识别：{eb_home_raw} vs {eb_away_raw}")
     target_time = mapper.timestamp_ms(event.get("mgt") or event.get("start_time_ms"))
+    eb_progress = _event_progress_signature(event)
     candidates = []
     for item in mapper.extract_pingbo_events(payload):
-        home, away = mapper.norm_team(item.get("home")), mapper.norm_team(item.get("away"))
-        stamp = mapper.timestamp_ms(item.get("start_time_ms"))
-        same = home == target_home and away == target_away
-        reverse = home == target_away and away == target_home
+        pb_home_raw, pb_away_raw = str(item.get("home") or "").strip(), str(item.get("away") or "").strip()
+        pb_home_id, pb_away_id = mapper.nba_team_id(pb_home_raw), mapper.nba_team_id(pb_away_raw)
+        if not pb_home_id or not pb_away_id or pb_home_id == pb_away_id:
+            continue
+        same = pb_home_id == eb_home_id and pb_away_id == eb_away_id
+        reverse = pb_home_id == eb_away_id and pb_away_id == eb_home_id
         if not (same or reverse):
             continue
-        if target_time is not None and stamp is not None and abs(target_time - stamp) > 5 * 60 * 1000:
+        stamp = mapper.timestamp_ms(item.get("start_time_ms"))
+        # User rule: full-name/short-name cases require an exact temporal anchor.
+        # All cases use exact kickoff equality when both source timestamps exist;
+        # otherwise a complete live period+clock+score signature must match.
+        if target_time is not None and stamp is not None:
+            temporal_match = target_time == stamp
+        else:
+            pb_progress = _event_progress_signature(item.get("_raw_event") or item)
+            temporal_match = eb_progress is not None and pb_progress is not None and eb_progress == pb_progress
+        if not temporal_match:
             continue
         candidates.append(item)
     if len(candidates) != 1:
         raise RuntimeError(
-            f"Pingbo event mapping failed: candidates={len(candidates)}, "
-            f"target={event.get('home') or event.get('mhn')} vs {event.get('away') or event.get('man')}, "
-            f"pingbo_events={len(mapper.extract_pingbo_events(payload))}; check odds-live data and team/time fields"
+            f"Pingbo event mapping failed: candidates={len(candidates)}; "
+            f"EB={eb_home_raw} vs {eb_away_raw}, "
+            f"team_ids={eb_home_id}/{eb_away_id}; "
+            "要求两边开赛时间戳完全一致，或完整滚球进程（节次、时钟、比分）完全一致"
         )
     return candidates[0]
 
