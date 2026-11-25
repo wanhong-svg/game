@@ -475,39 +475,104 @@ class BrowserSessionBridge:
         return list(rows_by_id.values())
 
     def discover_nba_total_selections(self):
-        """Discover NBA events from yewu11 list API, then fetch each actual detail by mid."""
+        """Discover NBA events and report safe schema diagnostics if totals cannot be resolved."""
         events = self.discover_nba_events()
         selections = []
+        diagnostics = {
+            "nba_events": len(events),
+            "details_fetched": 0,
+            "details_with_hps": 0,
+            "markets_total": 0,
+            "markets_hpid_38": 0,
+            "groups_hpid_38": 0,
+            "over_under_options": 0,
+            "complete_options": 0,
+            "missing_required_fields": {},
+            "market_ids": {},
+            "market_name_samples": [],
+            "event_field_names": [],
+            "market_field_names": [],
+            "group_field_names": [],
+            "option_field_names": [],
+        }
+
+        def add_field_names(key, value):
+            if isinstance(value, dict) and not diagnostics[key]:
+                diagnostics[key] = sorted(str(name) for name in value.keys())[:80]
+
         for event in events:
+            add_field_names("event_field_names", event)
             detail = self.fetch_match_detail(event)
+            diagnostics["details_fetched"] += 1
             detail_data = detail.get("data") if isinstance(detail, dict) else None
             markets = self._detail_market_lists(detail_data)
-            if not markets:
-                raise RuntimeError(
-                    f"赛事 {event.get('mid')} 的 getMatchDetailPB 解密成功，但未找到 hps 盘口数组；"
-                    "请核对真实详情 JSON 结构"
-                )
+            if markets:
+                diagnostics["details_with_hps"] += 1
+            diagnostics["markets_total"] += len(markets)
             for market in markets:
-                if str(market.get("hpid")) != "38":
+                hpid = str(market.get("hpid") or "")
+                diagnostics["market_ids"][hpid or "<empty>"] = (
+                    diagnostics["market_ids"].get(hpid or "<empty>", 0) + 1
+                )
+                add_field_names("market_field_names", market)
+                if len(diagnostics["market_name_samples"]) < 12:
+                    name = market.get("hpn") or market.get("name") or market.get("hn")
+                    if name not in (None, ""):
+                        diagnostics["market_name_samples"].append(str(name)[:100])
+                if hpid != "38":
                     continue
+                diagnostics["markets_hpid_38"] += 1
                 for group in market.get("hl") or []:
-                    if not isinstance(group, dict) or group.get("hv") in (None, ""):
+                    if not isinstance(group, dict):
                         continue
+                    diagnostics["groups_hpid_38"] += 1
+                    add_field_names("group_field_names", group)
                     for option in group.get("ol") or []:
-                        if not isinstance(option, dict) or str(option.get("ot") or "").strip().lower() not in {"under", "over"}:
+                        if not isinstance(option, dict):
                             continue
-                        required = (event.get("mid"), event.get("tid"), event.get("csid"),
-                                    event.get("csna"), market.get("hpn"), group.get("hid"),
-                                    option.get("oid"), option.get("ov"))
-                        if any(v in (None, "") for v in required):
+                        side = str(option.get("ot") or "").strip().lower()
+                        if side not in {"under", "over"}:
                             continue
-                        runtime_context = self.runtime_context_for_event(event["mid"], market=market, group=group)
+                        diagnostics["over_under_options"] += 1
+                        add_field_names("option_field_names", option)
+                        required = {
+                            "event.mid": event.get("mid"),
+                            "event.tid": event.get("tid"),
+                            "event.csid": event.get("csid"),
+                            "event.csna": event.get("csna"),
+                            "market.hpn": market.get("hpn"),
+                            "group.hid": group.get("hid"),
+                            "option.oid": option.get("oid"),
+                            "option.ov": option.get("ov"),
+                        }
+                        missing = [name for name, value in required.items() if value in (None, "")]
+                        if missing:
+                            for name in missing:
+                                diagnostics["missing_required_fields"][name] = (
+                                    diagnostics["missing_required_fields"].get(name, 0) + 1
+                                )
+                            continue
+                        diagnostics["complete_options"] += 1
+                        runtime_context = self.runtime_context_for_event(
+                            event["mid"], market=market, group=group)
                         selections.append({
                             "event": event, "market": market, "group": group,
                             "option": option, "runtime_context": runtime_context,
                         })
         if not selections:
-            raise RuntimeError("实时 NBA 详情接口中没有找到字段完整的全场大小分选项")
+            print("\\n=== EB NBA 大小分字段诊断（仅字段名和计数，不含请求凭证或原始响应） ===")
+            print(json.dumps(diagnostics, ensure_ascii=False, indent=2))
+            if not events:
+                reason = "没有从赛事列表筛选到 NBA 正规赛事；请核对赛事列表响应中的联赛字段"
+            elif diagnostics["markets_total"] == 0:
+                reason = "详情响应中没有找到 hps 盘口数组"
+            elif diagnostics["markets_hpid_38"] == 0:
+                reason = "详情中没有 hpid=38 的盘口；需要根据实际市场名称确认全场大小分对应的 hpid"
+            elif diagnostics["over_under_options"] == 0:
+                reason = "hpid=38 盘口中没有 ot=over/under 的选项"
+            else:
+                reason = "找到了大小分选项，但缺少构建选项所需字段；请查看 missing_required_fields"
+            raise RuntimeError("实时 NBA 全场大小分选项未能完整提取：" + reason)
         return selections
 
     def post_json(self, base_url, path, body, headers, timeout=15):
