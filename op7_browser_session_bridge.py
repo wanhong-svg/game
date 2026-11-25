@@ -362,6 +362,8 @@ class BrowserSessionBridge:
 
     def _pending_event_monitor_loop(self):
         while not self._pending_event_monitor_stop.wait(600):
+            if live.USER_INPUT_WAITING.is_set():
+                continue
             with self._pending_event_snapshot_lock:
                 snapshots = {
                     venue: list(rows) if rows is not None else None
