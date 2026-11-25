@@ -242,6 +242,15 @@ def _allowed_test_host(host):
     explicit = {x.strip().lower().rstrip(".") for x in os.environ.get("OP7_TEST_BET_ALLOWED_HOSTS", "").split(",") if x.strip()}
     if host in explicit:
         return True
+    # Project owner has designated the configured API hosts as their managed test environment.
+    configured = set(ENDPOINTS.get("apis", {}).get("eb", {}).get("hosts", []))
+    discovered = {
+        str(x.get("host", "")).lower().rstrip(".")
+        for x in ENDPOINTS.get("discovered_endpoints", [])
+        if x.get("family") == "eb"
+    }
+    if host in configured | discovered:
+        return True
     if host in {"localhost", "127.0.0.1", "::1"} or host.endswith((".localhost", ".local", ".test")):
         return True
     try:
@@ -408,11 +417,12 @@ def main():
     parser.add_argument("--stake", default="100", help="fixed simulated test stake in yuan (default: 100)")
     parser.add_argument("--submit-test", action="store_true", help="send only after local-test guards pass")
     parser.add_argument("--timeout", type=int, default=15)
+    parser.add_argument("--profiles-dir", default="browser_profiles")
     args = parser.parse_args()
     selection = json.loads(Path(args.input).read_text(encoding="utf-8"))
     if args.submit_test:
         from op7_browser_session_bridge import BrowserSessionBridge
-        with BrowserSessionBridge(profiles_dir="browser_profiles", timeout=args.timeout) as browser_session:
+        with BrowserSessionBridge(profiles_dir=args.profiles_dir, timeout=args.timeout) as browser_session:
             result = submit_test_bet(
                 selection, args.stake, args.timeout,
                 cross_odds_refresh=lambda: browser_session.refresh_cross_odds(selection),
