@@ -182,18 +182,43 @@ def flatten_eb_markets(data,precision=2,event_status_by_mid=None):
 
 def norm_team(s): return re.sub(r'[\s\u3000\-_.()（）\[\]【】]+','',str(s or '').strip().lower())
 
+def is_nba_league(value):
+    """Accept only explicitly identified NBA league labels; reject unknown competitions."""
+    label=re.sub(r'[\s\u3000]+','',str(value or '').strip()).upper()
+    if not label:
+        return False
+    if 'G-LEAGUE' in label or 'G联赛' in label or '发展联盟' in label:
+        return False
+    return label in {'NBA','NBA常规赛','NBA季后赛','美国职业篮球','美国职业篮球联赛',
+                     '美國職業籃球','美國職業籃球聯賽'}
+
 def extract_pingbo_events(payload):
     found=[]
-    def rec(x):
+    league_keys=('league','leagueName','league_name','competition','competitionName',
+                 'competition_name','tournament','tournamentName','tn','tnjc')
+    def rec(x, context=None):
+        context=dict(context or {})
         if isinstance(x,list):
             if len(x)>=9 and isinstance(x[1],str) and isinstance(x[2],str) and isinstance(x[8],dict):
                 found.append({'venue':'PINGBO','event_id':str(x[0]),'home':x[1],'away':x[2],
+                  'league':context.get('league'),'sport':context.get('sport'),
                   'raw_status':x[3] if len(x)>3 else None,'start_time_ms':x[4] if len(x)>4 else None,
                   'market_keys':sorted(x[8].keys()),'raw_tuple_length':len(x),'_raw_markets':x[8]})
             else:
-                for z in x: rec(z)
+                for z in x: rec(z,context)
         elif isinstance(x,dict):
-            for z in x.values(): rec(z)
+            for key in league_keys:
+                value=x.get(key)
+                if isinstance(value,(str,int,float)) and str(value).strip():
+                    context['league']=str(value)
+                    break
+            for key in ('sport','sportName','sport_name','csna'):
+                value=x.get(key)
+                if isinstance(value,(str,int,float)) and str(value).strip():
+                    context['sport']=str(value)
+                    break
+            for z in x.values():
+                if isinstance(z,(dict,list)): rec(z,context)
     rec(payload)
     unique={e['event_id']:e for e in found}
     return list(unique.values())
