@@ -605,18 +605,16 @@ class BrowserSessionBridge:
         for endpoint in target_paths:
             live.CAPTURED_REQUESTS.pop(("eb", endpoint), None)
 
+        wait_seconds = 30.0
         print(
             "请现在刷新一次当前 NBA 列表页；"
-            "脚本正在等待 matchesPagePB 或 noLiveMatchesPagePB 的最新请求（最多 20 秒）...",
+            f"脚本将持续等待并捕获 matchesPagePB 或 noLiveMatchesPagePB 的请求（至少 {int(wait_seconds)} 秒）...",
             flush=True,
         )
-        deadline = time.monotonic() + 20.0
-        first_response_at = None
+        # Keep listening for the full window so late pagination/refresh requests
+        # are included; the newest captured request is selected after the window.
+        deadline = time.monotonic() + wait_seconds
         while time.monotonic() < deadline:
-            if self._list_responses and first_response_at is None:
-                first_response_at = time.monotonic()
-            if first_response_at is not None and time.monotonic() - first_response_at >= 1.5:
-                break
             for page in list(self.op7.pages):
                 try:
                     page.wait_for_timeout(250)
