@@ -348,6 +348,7 @@ class BrowserSessionBridge:
             odds_path = "/yewu11/v1/m/matchDetail/getMatchOddsInfoPB"
             if not (parsed.path in live.EB_NBA_PAGE_ENDPOINTS
                     or parsed.path.endswith("/getMatchDetailPB")
+                    or parsed.path.endswith("/initPB")
                     or parsed.path == odds_path):
                 return
 
