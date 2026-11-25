@@ -447,6 +447,124 @@ def redact(value):
     return value
 
 
+def _selection_with_runtime(candidate):
+    runtime = candidate["runtime_context"]
+    return {
+        "event": candidate["event"],
+        "market": candidate["market"],
+        "group": candidate["group"],
+        "option": candidate["option"],
+        "match_type": int(runtime["match_type"]),
+        "cuid": str(runtime["cuid"]),
+        "device_imei": str(runtime["device_imei"]),
+        "market_type_finally": str(runtime["market_type_finally"]),
+    }
+
+
+def _write_selection_file(selection, output_path):
+    output_path = Path(output_path).expanduser()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = output_path.with_name(output_path.name + ".tmp")
+    temp_path.write_text(
+        json.dumps(selection, ensure_ascii=False, indent=2) + "\\n",
+        encoding="utf-8",
+    )
+    temp_path.replace(output_path)
+    return output_path
+
+
+def auto_run_once(browser_session, stake, timeout, output_path):
+    """Discover live NBA totals, rank fresh cross-book opportunities, and submit at most one."""
+    candidates = browser_session.discover_nba_total_selections()
+    if not candidates:
+        raise RuntimeError("没有发现可用的 NBA 全场大小分候选；本轮未提交")
+    groups = {}
+    for candidate in candidates:
+        key = (str(candidate["event"].get("mid")), str(candidate["group"].get("hv")))
+        groups.setdefault(key, candidate)
+
+    eligible = []
+    rejected = []
+    for key, probe in groups.items():
+        try:
+            cross = refresh_and_validate_cross_odds(
+                lambda p=probe: browser_session.refresh_cross_odds(p), max_seconds=5.0
+            )
+            side = cross["direction"].lower()
+            matching = next((
+                item for item in candidates
+                if (str(item["event"].get("mid")), str(item["group"].get("hv"))) == key
+                and str(item["option"].get("ot") or "").lower() == side
+            ), None)
+            if matching is None:
+                rejected.append({"event_id": key[0], "line": key[1], "reason": "方向没有对应的实时 EB 选项"})
+                continue
+            passed_sum = Decimal(cross["a_reciprocal_sum"] if side == "under"
+                                 else cross["b_reciprocal_sum"])
+            margin = Decimal(cross["threshold"]) - passed_sum
+            eligible.append((margin, matching, cross))
+        except Exception as exc:
+            rejected.append({
+                "event_id": key[0], "line": key[1],
+                "reason": f"{type(exc).__name__}: {str(exc)[:240]}",
+            })
+
+    if not eligible:
+        print(json.dumps({
+            "mode": "AUTO_RUN_NO_QUALIFIED_EDGE",
+            "discovered_candidates": len(candidates),
+            "checked_event_lines": len(groups),
+            "rejected": rejected,
+            "submitted": False,
+        }, ensure_ascii=False, indent=2))
+        return None
+
+    # Highest reciprocal-sum margin first; submit no more than one candidate this run.
+    eligible.sort(key=lambda item: item[0], reverse=True)
+    for margin, candidate, cross in eligible:
+        selection = _selection_with_runtime(candidate)
+        saved_path = _write_selection_file(selection, output_path)
+        print(
+            "[AUTO_SELECTED]",
+            f"event_id={selection['event'].get('mid')}",
+            f"line={selection['group'].get('hv')}",
+            f"side={selection['option'].get('ot')}",
+            f"edge_margin={margin}",
+            f"input={saved_path}",
+            flush=True,
+        )
+        try:
+            result = submit_test_bet(
+                selection, stake, timeout,
+                cross_odds_refresh=lambda s=selection: browser_session.refresh_cross_odds(s),
+                browser_session=browser_session,
+            )
+            result["input_file"] = str(saved_path)
+            result["auto_run"] = True
+            return result
+        except Exception as exc:
+            # Do not try a second candidate after an uncertain POST outcome.
+            message = str(exc)
+            if "outcome is uncertain" in message or "duplicate candidate" in message:
+                raise
+            rejected.append({
+                "event_id": str(selection["event"].get("mid")),
+                "line": str(selection["group"].get("hv")),
+                "reason": f"submission precheck: {type(exc).__name__}: {message[:240]}",
+            })
+            # Continue only when the previous candidate was stopped before POST.
+            continue
+
+    print(json.dumps({
+        "mode": "AUTO_RUN_NO_ORDER_ACCEPTED",
+        "discovered_candidates": len(candidates),
+        "checked_event_lines": len(groups),
+        "rejected": rejected,
+        "submitted": False,
+    }, ensure_ascii=False, indent=2))
+    return None
+
+
 def main():
     parser = argparse.ArgumentParser(description="Build or submit one local-test OP7/EB wager")
     parser.add_argument("--input", help="optional legacy JSON; omitted when using --discover-nba")
@@ -457,7 +575,17 @@ def main():
     parser.add_argument("--profiles-dir", default="browser_profiles")
     parser.add_argument("--output", help="write one discovered live selection JSON to this path")
     parser.add_argument("--selection-index", type=int, default=0, help="zero-based candidate index to write (default: 0)")
+    parser.add_argument("--auto-run", action="store_true", help="discover, compare live odds, build input, and submit at most one qualifying order")
     args = parser.parse_args()
+    if args.auto_run:
+        if args.input or args.discover_nba or not args.submit_test:
+            parser.error("--auto-run cannot be combined with --input/--discover-nba and requires --submit-test")
+        from op7_browser_session_bridge import BrowserSessionBridge
+        with BrowserSessionBridge(profiles_dir=args.profiles_dir, timeout=args.timeout) as browser_session:
+            result = auto_run_once(browser_session, args.stake, args.timeout, args.output or "./selections.json")
+        if result is not None:
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+        return
     if args.discover_nba:
         if args.input or args.submit_test:
             parser.error("--discover-nba only generates input data; run submission separately with --input and --submit-test")
