@@ -227,7 +227,9 @@ _PAGE_AUTO_SCROLL_SCRIPT = r"""
         }
       }
       const amount = Math.max(300, Math.floor((target.clientHeight || window.innerHeight) * 0.7));
-      target.scrollBy({top: window.__op7AlternatingScrollDirection * amount, behavior: "smooth"});
+      const direction = window.__op7AlternatingScrollDirection;
+      target.scrollBy({top: direction * amount, behavior: "smooth"});
+      console.log("[页面滚动] " + (direction < 0 ? "上滑" : "下滑"));
       window.__op7AlternatingScrollDirection *= -1;
     } catch (_) {}
   }, 60000);
@@ -321,6 +323,7 @@ class BrowserSessionBridge:
         if page in attached:
             return
         attached.add(page)
+        page.on("console", lambda msg: _console_stage(msg.text) if msg.type == "log" and msg.text.startswith("[页面滚动]") else None)
         try:
             # Install in the current document and every subsequent navigation.
             page.add_init_script(_PAGE_AUTO_SCROLL_SCRIPT)
