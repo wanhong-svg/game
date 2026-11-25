@@ -436,7 +436,7 @@ class BrowserSessionBridge:
                 for field, entries in found.items():
                     paths = sorted({where for _, where in entries})
                     print(
-                        "[EB_MANUAL_BET_RUNTIME_DIAG]",
+                        "【EB】[EB_MANUAL_BET_RUNTIME_DIAG]",
                         f"method={request.method}",
                         f"path={parsed.path}",
                         f"field={field}",
@@ -469,7 +469,7 @@ class BrowserSessionBridge:
                     if entries:
                         paths = sorted({where for _, where in entries})
                         print(
-                            "[EB_REQUEST_RUNTIME_DIAG]",
+                            "【EB】[EB_REQUEST_RUNTIME_DIAG]",
                             f"method={request.method}",
                             f"path={parsed.path}",
                             f"field={field}",
@@ -492,7 +492,7 @@ class BrowserSessionBridge:
                         "captured_at_monotonic": template.get("captured_at_monotonic", time.monotonic()),
                     }
                 print(
-                    "[EB_ODDS_REQUEST]",
+                    "【EB】[EB_ODDS_REQUEST]",
                     f"method={request.method}",
                     f"path={parsed.path}",
                     f"has_mid={bool(query.get('mid'))}",
@@ -508,7 +508,7 @@ class BrowserSessionBridge:
                 allowed_paths = set(api.get("read_paths", []) + api.get("bet_paths", []))
                 captured_template = live.CAPTURED_REQUESTS.get(("eb", parsed.path))
                 print(
-                    "[EB_DETAIL_REQUEST]",
+                    "【EB】[EB_DETAIL_REQUEST]",
                     "family=op7",
                     f"method={request.method}",
                     f"path={parsed.path}",
@@ -560,7 +560,7 @@ class BrowserSessionBridge:
                 })
                 for field, entries in init_found.items():
                     paths = sorted({where for _, where in entries})
-                    print("[EB_INIT_RUNTIME_DIAG]", f"field={field}",
+                    print("【EB】[EB_INIT_RUNTIME_DIAG]", f"field={field}",
                           f"found={bool(entries)}",
                           f"paths={json.dumps(paths, ensure_ascii=False)}", flush=True)
 
@@ -605,7 +605,7 @@ class BrowserSessionBridge:
                     if leagues == {"NBA"} and row.get("mid"):
                         nba_exact += 1
                 print(
-                    "[EB_RESPONSE_DECODE]",
+                    "【EB】[EB_RESPONSE_DECODE]",
                     f"path={short_name}",
                     f"http={response.status}",
                     f"data_type={type(data).__name__}",
@@ -617,7 +617,7 @@ class BrowserSessionBridge:
             else:
                 fields = sorted(str(key) for key in data.keys())[:40] if isinstance(data, dict) else []
                 print(
-                    "[EB_RESPONSE_DECODE]",
+                    "【EB】[EB_RESPONSE_DECODE]",
                     f"path={short_name}",
                     f"http={response.status}",
                     f"data_type={type(data).__name__}",
@@ -727,7 +727,7 @@ class BrowserSessionBridge:
         data = payload.get("data")
         fields = sorted(str(key) for key in data.keys())[:50] if isinstance(data, dict) else []
         print(
-            "[EB_ODDS_DECODE]",
+            "【EB】[EB_ODDS_DECODE]",
             f"mid={mid}",
             f"data_type={type(data).__name__}",
             f"data_fields={json.dumps(fields, ensure_ascii=False)}",
@@ -800,7 +800,7 @@ class BrowserSessionBridge:
                 latest_manual["payload"],
             ))
             print(
-                "[EB_MANUAL_BET_RUNTIME_SOURCE]",
+                "【EB】[EB_MANUAL_BET_RUNTIME_SOURCE]",
                 f"path={latest_manual['path']}",
                 f"captured_fields={json.dumps(latest_manual['fields_found'], ensure_ascii=False, sort_keys=True)}",
                 flush=True,
@@ -837,11 +837,11 @@ class BrowserSessionBridge:
                         })
                         for field, entries in found.items():
                             paths = sorted({where for _, where in entries})
-                            print("[EB_BROWSER_RUNTIME_DIAG]", f"page={page_index}",
+                            print("【EB】[EB_BROWSER_RUNTIME_DIAG]", f"page={page_index}",
                                   f"field={field}", f"found={bool(entries)}",
                                   f"paths={json.dumps(paths, ensure_ascii=False)}", flush=True)
                 except Exception as exc:
-                    print("[EB_BROWSER_RUNTIME_DIAG]", f"page={page_index}",
+                    print("【EB】[EB_BROWSER_RUNTIME_DIAG]", f"page={page_index}",
                           f"storage_read_error={type(exc).__name__}", flush=True)
         return _resolve_runtime_fields(sources, event_id, market=market, group=group)
 
@@ -1062,7 +1062,7 @@ class BrowserSessionBridge:
                 rows_by_id[str(event["mid"])] = event
 
             print(
-                "[EB_NBA_PAGE_DIAG]",
+                "【EB】[EB_NBA_PAGE_DIAG]",
                 f"page={page_no}",
                 f"rows={len(events)}",
                 f"pages_type={type(pages_value).__name__}",
@@ -1337,7 +1337,6 @@ class BrowserSessionBridge:
 
     def refresh_cross_odds(self, selection):
         """Fetch both books in one synchronous window using the browser's logged-in sessions."""
-        started = time.monotonic()
         event = selection["event"]
         line = selection["group"].get("hv")
         if line in (None, ""):
@@ -1347,6 +1346,7 @@ class BrowserSessionBridge:
         eb_path = "/yewu11/v1/m/matchDetail/getMatchOddsInfoPB"
         pb_path = "/sports-service/sv/mobile/odds-live"
         self.ensure_pingbo_live_capture()
+        started = time.monotonic()
         cfg_path = Path(__file__).with_name("refresh_config.json")
         cfg = json.loads(cfg_path.read_text(encoding="utf-8")) if cfg_path.exists() else {}
         eb_params = dict((cfg.get("op7") or {}).get("odds_params") or {})
