@@ -331,9 +331,9 @@ def submit_test_bet(selection, stake, timeout=15, cross_odds_refresh=None):
     amount = as_decimal(stake)
     if min_stake is None or amount is None or amount < min_stake:
         raise RuntimeError("stake is below the confirmed minimum; stopped before bet")
-    if amount != Decimal("11"):
-        raise RuntimeError("本流程固定每笔投注 11 元；金额不一致，已停止")
-    max_test_stake = as_decimal(os.environ.get("OP7_TEST_BET_MAX_STAKE", "11"))
+    if amount != Decimal("100"):
+        raise RuntimeError("本流程固定每笔模拟投注 100 元；金额不一致，已停止")
+    max_test_stake = as_decimal(os.environ.get("OP7_TEST_BET_MAX_STAKE", "100"))
     if max_test_stake is None or amount > max_test_stake:
         raise RuntimeError("stake exceeds OP7_TEST_BET_MAX_STAKE; stopped before bet")
 
@@ -401,7 +401,7 @@ def redact(value):
 def main():
     parser = argparse.ArgumentParser(description="Build or submit one local-test OP7/EB wager")
     parser.add_argument("--input", required=True, help="local JSON with event/market/group/option fields")
-    parser.add_argument("--stake", default="11", help="test stake amount in yuan (default: 11)")
+    parser.add_argument("--stake", default="100", help="fixed simulated test stake in yuan (default: 100)")
     parser.add_argument("--submit-test", action="store_true", help="send only after local-test guards pass")
     parser.add_argument("--timeout", type=int, default=15)
     args = parser.parse_args()
