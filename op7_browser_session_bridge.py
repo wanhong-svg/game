@@ -202,6 +202,7 @@ class BrowserSessionBridge:
         self.op7 = None
         self.pingbo = None
         self._detail_responses = {}
+        self._attached_pages = {"op7": set(), "pingbo": set()}
 
     @staticmethod
     def _prompt_site_url(label):
@@ -227,10 +228,10 @@ class BrowserSessionBridge:
             (self.op7, "OP7", "op7"),
             (self.pingbo, "Pingbo", "pingbo"),
         ):
+            # Listen at context level so tabs/popups opened after login are covered too.
+            ctx.on("page", lambda page, f=family: self._attach_page(page, f))
             page = ctx.pages[0] if ctx.pages else ctx.new_page()
-            page.on("request", lambda req, f=family: live.capture_request(req, f))
-            if family == "op7":
-                page.on("response", self._capture_op7_response)
+            self._attach_page(page, family)
             url = self._prompt_site_url(label)
             try:
                 page.goto(url, wait_until="domcontentloaded", timeout=self.timeout * 1000)
@@ -240,8 +241,24 @@ class BrowserSessionBridge:
         time.sleep(1.0)
         return self
 
+    def _attach_page(self, page, family):
+        """Attach request/response observers once to every page in a browser context."""
+        attached = self._attached_pages.setdefault(family, set())
+        if page in attached:
+            return
+        attached.add(page)
+        page.on("request", lambda req, f=family: live.capture_request(req, f))
+        if family == "op7":
+            page.on("response", self._capture_op7_response)
+
     def __exit__(self, exc_type, exc, tb):
         try:
+            if exc_type is not None:
+                print("\\n检测过程中发生异常。浏览器暂时保持打开，便于检查页面；回到终端按 Enter 后关闭浏览器。")
+                try:
+                    input()
+                except (EOFError, KeyboardInterrupt):
+                    pass
             if self.op7:
                 self.op7.close()
             if self.pingbo:
@@ -344,7 +361,24 @@ class BrowserSessionBridge:
         input("请在已打开的 OP7 浏览器中手动进入「篮球 / NBA 正规赛事」列表，等待赛事加载完成后回到终端按 Enter：")
         template = live.CAPTURED_REQUESTS.get(("eb", path))
         if template is None:
-            raise RuntimeError("未捕获 EB 赛事列表请求；请在 OP7 页面进入篮球/NBA赛事列表后重试")
+            captured = sorted(
+                f"{family}:{captured_path}"
+                for family, captured_path in live.CAPTURED_REQUESTS
+                if family == "eb"
+            )
+            discovered = sorted({
+                item.get("path", "")
+                for item in live.ENDPOINTS.get("discovered_endpoints", [])
+                if item.get("family") == "eb" and item.get("path")
+            })
+            print("\\n=== EB 请求捕获诊断（不含凭证或请求体） ===")
+            print("live 模块路径:", live.__file__)
+            print("已捕获 EB 请求:", captured or "无")
+            print("已发现 EB 请求路径:", discovered or "无")
+            raise RuntimeError(
+                "已发现 EB 赛事列表请求路径，但内存中没有可用模板；"
+                "请检查请求监听器及 CAPTURED_REQUESTS 生命周期"
+            )
         try:
             body = json.loads(template.get("post_data") or "{}")
         except Exception:
