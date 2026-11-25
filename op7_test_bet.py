@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """Guarded local-test wager flow. Network submission is disabled by default."""
+import contextlib
+import io
 import argparse
 import hashlib
 import ipaddress
@@ -757,10 +759,16 @@ def main():
         ))
         from op7_browser_session_bridge import BrowserSessionBridge
         with BrowserSessionBridge(profiles_dir=args.profiles_dir, timeout=args.timeout) as browser_session:
-            # Rediscover the complete current-day NBA slate at the start of every round.
+            first_round = True
             while True:
                 try:
-                    candidates = browser_session.discover_nba_total_selections()
+                    if first_round:
+                        input("首次运行：请在 OP7 浏览器打开 NBA 赛事列表，刷新一次后回到这里按 Enter；后续轮次会自动刷新赛事列表：")
+                        browser_session._nba_capture_confirmed = True
+                        first_round = False
+                    # Suppress browser/schema diagnostics; only trading-state logs are shown.
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        candidates = browser_session.discover_nba_total_selections()
                     if candidates:
                         auto_run_once(
                             browser_session, args.stake, args.timeout,
@@ -771,7 +779,7 @@ def main():
                     raise
                 except Exception as exc:
                     print("[错误]", f"{type(exc).__name__}: {str(exc)[:400]}", flush=True)
-                # All currently discovered NBA games have been checked; wait 2 minutes.
+                # Wait only after the entire currently discovered NBA slate is processed.
                 time.sleep(120)
         return
     if args.discover_nba:
