@@ -440,6 +440,35 @@ class BrowserSessionBridge:
             body["cps"] = page_size
         origin = live.CAPTURED_ORIGINS.get("eb", live.SITES["EB_ORIGIN"])
         rows_by_id = {}
+        response_schema_samples = []
+        classification_keys = {
+            "csid", "csna", "tn", "tnjc", "league", "leaguename",
+            "league_name", "sport", "sportname", "sport_name",
+            "category", "categoryname", "competition", "competitionname",
+            "competition_name", "type", "matchtype", "sportid"
+        }
+        def inspect_candidate_rows(node, found=None):
+            found = found if found is not None else []
+            if isinstance(node, dict):
+                keys = {str(k).lower().replace("-", "_") for k in node}
+                has_mid = any(k in keys for k in ("mid", "matchid", "id"))
+                has_teams = any(k in keys for k in ("mhn", "man", "homename", "awayname", "home", "away"))
+                if has_mid and has_teams and len(found) < 8:
+                    class_values = {}
+                    for key, value in node.items():
+                        normalized = str(key).lower().replace("-", "_")
+                        if normalized in classification_keys and not isinstance(value, (dict, list)):
+                            class_values[str(key)] = str(value)[:80]
+                    found.append({
+                        "field_names": sorted(str(k) for k in node.keys())[:80],
+                        "classification_values": class_values,
+                    })
+                for child in node.values():
+                    inspect_candidate_rows(child, found)
+            elif isinstance(node, list):
+                for child in node:
+                    inspect_candidate_rows(child, found)
+            return found
         for page_no in range(1, max(1, int(max_pages)) + 1):
             body["cpn"] = page_no
             response = live.request_json(
@@ -447,6 +476,12 @@ class BrowserSessionBridge:
                 live.headers_env("OP7_READONLY_HEADERS_JSON"),
                 body=body, timeout_ms=self.timeout * 1000, family="eb")
             data = live.data_of(response)
+            response_schema_samples.append({
+                "data_type": type(data).__name__,
+                "data_field_names": sorted(str(k) for k in data.keys())[:80] if isinstance(data, dict) else [],
+                "nested_data_type": type(data.get("data")).__name__ if isinstance(data, dict) else None,
+                "candidate_event_rows": inspect_candidate_rows(data),
+            })
             if isinstance(data, dict):
                 try:
                     total_pages = max(1, min(int(data.get("pages") or 1), int(max_pages)))
@@ -472,6 +507,17 @@ class BrowserSessionBridge:
                 rows_by_id[str(event["mid"])] = event
             if page_no >= total_pages:
                 break
+        if not rows_by_id:
+            print("\\n=== EB NBA 赛事列表结构诊断（不含凭证、请求体或完整赛事内容） ===")
+            print(json.dumps({
+                "response_samples": response_schema_samples[:3],
+                "filter_rule": {
+                    "csid_required": "2",
+                    "league_fields": ["tn", "tnjc"],
+                    "league_value_required": "NBA",
+                    "mid_required": True,
+                },
+            }, ensure_ascii=False, indent=2))
         return list(rows_by_id.values())
 
     def discover_nba_total_selections(self):
