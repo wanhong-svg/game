@@ -188,6 +188,7 @@ class BrowserSessionBridge:
         self.pingbo = None
         self._detail_responses = {}
         self._odds_responses = {}
+        self._init_responses = []
         self._odds_request_template = None
         self._list_responses = {}
         self._request_templates_by_id = {}
@@ -353,6 +354,23 @@ class BrowserSessionBridge:
             payload = _decode_api_response(response.text())
             data = payload.get("data") if isinstance(payload, dict) else payload
             short_name = parsed.path.rsplit("/", 1)[-1]
+
+            # Keep a small in-memory sample of init responses for runtime-field discovery.
+            # Never log response values or persist device identifiers.
+            if parsed.path.endswith("/initPB"):
+                self._init_responses.append(payload)
+                self._init_responses = self._init_responses[-5:]
+                init_found = _walk_field_values(payload, {
+                    "device_imei": {"deviceimei", "imei"},
+                    "cuid": {"cuid"},
+                    "match_type": {"matchtype"},
+                    "market_type_finally": {"markettypefinally"},
+                })
+                for field, entries in init_found.items():
+                    paths = sorted({where for _, where in entries})
+                    print("[EB_INIT_RUNTIME_DIAG]", f"field={field}",
+                          f"found={bool(entries)}",
+                          f"paths={json.dumps(paths, ensure_ascii=False)}", flush=True)
 
             # Retain only list responses whose request was captured in this fresh epoch.
             if parsed.path in {
@@ -579,6 +597,46 @@ class BrowserSessionBridge:
                 ("odds_request", odds_record["request"]),
                 ("odds_response", odds_record["response"]),
             ])
+        for index, payload in enumerate(self._init_responses):
+            sources.append((f"init_response[{index}]", payload))
+
+        # Inspect only explicitly named runtime keys in browser storage. Values stay
+        # in process memory and are never written to logs or files.
+        storage_aliases = {
+            "deviceimei", "imei", "cuid", "matchtype", "markettypefinally"
+        }
+        if self.op7:
+            for page_index, page in enumerate(self.op7.pages):
+                try:
+                    storage_payload = page.evaluate("""() => {
+                        const out = {localStorage: {}, sessionStorage: {}};
+                        for (const [name, store] of [["localStorage", window.localStorage], ["sessionStorage", window.sessionStorage]]) {
+                            for (let i = 0; i < store.length; i++) {
+                                const key = store.key(i);
+                                const normalized = String(key).replace(/_/g, "").toLowerCase();
+                                if (["deviceimei", "imei", "cuid", "matchtype", "markettypefinally"].includes(normalized)) {
+                                    out[name][key] = store.getItem(key);
+                                }
+                            }
+                        }
+                        return out;
+                    }""")
+                    if isinstance(storage_payload, dict):
+                        sources.append((f"browser_storage[{page_index}]", storage_payload))
+                        found = _walk_field_values(storage_payload, {
+                            "device_imei": {"deviceimei", "imei"},
+                            "cuid": {"cuid"},
+                            "match_type": {"matchtype"},
+                            "market_type_finally": {"markettypefinally"},
+                        })
+                        for field, entries in found.items():
+                            paths = sorted({where for _, where in entries})
+                            print("[EB_BROWSER_RUNTIME_DIAG]", f"page={page_index}",
+                                  f"field={field}", f"found={bool(entries)}",
+                                  f"paths={json.dumps(paths, ensure_ascii=False)}", flush=True)
+                except Exception as exc:
+                    print("[EB_BROWSER_RUNTIME_DIAG]", f"page={page_index}",
+                          f"storage_read_error={type(exc).__name__}", flush=True)
         return _resolve_runtime_fields(sources, event_id, market=market, group=group)
 
     def discover_nba_events(self, max_pages=20):
