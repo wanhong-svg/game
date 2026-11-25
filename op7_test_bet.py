@@ -341,21 +341,13 @@ def submit_test_bet(selection, stake, timeout=15, cross_odds_refresh=None, brows
     if not isinstance(odds_value, (int, float)) or int(odds_value) <= 100000:
         raise RuntimeError("latest odds value is invalid; stopped before bet")
 
-    limit_response = post_json(base_url, LIMIT_PATH, build_limit_request(selection, int(odds_value)), headers, timeout, browser_session)
-    limit_rows = require_success(limit_response, LIMIT_PATH)
-    if not isinstance(limit_rows, list) or not limit_rows or not limit_rows[0].get("minBet"):
-        raise RuntimeError("stake limit response is incomplete; stopped before bet")
-    min_stake = as_decimal(limit_rows[0]["minBet"])
     amount = as_decimal(stake)
-    if min_stake is None or amount is None or amount < min_stake:
-        raise RuntimeError("stake is below the confirmed minimum; stopped before bet")
-    if amount != Decimal("100"):
+    if amount is None or amount != Decimal("100"):
         raise RuntimeError("本流程固定每笔模拟投注 100 元；金额不一致，已停止")
     max_test_stake = as_decimal(os.environ.get("OP7_TEST_BET_MAX_STAKE", "100"))
     if max_test_stake is None or amount > max_test_stake:
         raise RuntimeError("stake exceeds OP7_TEST_BET_MAX_STAKE; stopped before bet")
 
-    payload = build_bet_payload(selection, amount, odds_value=int(odds_value))
     if cross_odds_refresh is None and browser_session is not None:
         cross_odds_refresh = lambda: browser_session.refresh_cross_odds(selection)
     if cross_odds_refresh is None:
@@ -364,6 +356,24 @@ def submit_test_bet(selection, stake, timeout=15, cross_odds_refresh=None, brows
     selected_side = str(selection["option"].get("ot") or "").lower()
     if selected_side != cross_check["direction"].lower():
         raise RuntimeError("候选方向与最新A/B复核方向不一致；禁止发送投注")
+    fresh_key = "eb_" + selected_side
+    fresh_decimal_odds = as_decimal(cross_check["snapshot"].get(fresh_key))
+    if fresh_decimal_odds is None or fresh_decimal_odds <= 1:
+        raise RuntimeError("5秒复核未取得有效的 EB 最新赔率；已停止")
+    odds_value = int((fresh_decimal_odds * Decimal(100000)).quantize(Decimal("1")))
+    if odds_value <= 100000:
+        raise RuntimeError("5秒复核后的 EB 最新赔率无效；已停止")
+
+    # Query the limit using the odds from the same fresh cross-book snapshot.
+    limit_response = post_json(base_url, LIMIT_PATH, build_limit_request(selection, odds_value), headers, timeout, browser_session)
+    limit_rows = require_success(limit_response, LIMIT_PATH)
+    if not isinstance(limit_rows, list) or not limit_rows or not limit_rows[0].get("minBet"):
+        raise RuntimeError("stake limit response is incomplete; stopped before bet")
+    min_stake = as_decimal(limit_rows[0]["minBet"])
+    if min_stake is None or amount < min_stake:
+        raise RuntimeError("stake is below the confirmed minimum; stopped before bet")
+
+    payload = build_bet_payload(selection, amount, odds_value=odds_value)
     key = _candidate_key(selection)
     if ORDER_AUDIT_PATH.exists():
         try:
