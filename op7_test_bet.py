@@ -274,7 +274,9 @@ def _headers():
     return headers
 
 
-def post_json(base_url, path, body, headers, timeout=15):
+def post_json(base_url, path, body, headers, timeout=15, browser_session=None):
+    if browser_session is not None:
+        return browser_session.post_json(base_url, path, body, headers, timeout)
     req = urllib.request.Request(
         base_url + path, data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
         headers=headers, method="POST"
@@ -299,10 +301,10 @@ def require_success(response, endpoint):
     return response.get("data")
 
 
-def submit_test_bet(selection, stake, timeout=15, cross_odds_refresh=None):
+def submit_test_bet(selection, stake, timeout=15, cross_odds_refresh=None, browser_session=None):
     base_url = validate_test_target(os.environ.get("OP7_TEST_BET_BASE_URL", ENDPOINTS["apis"]["eb"].get("bet_api_base_url") or ENDPOINTS["apis"]["eb"]["base_url"]))
     headers = _headers()
-    latest_response = post_json(base_url, LATEST_PATH, build_latest_market_request(selection), headers, timeout)
+    latest_response = post_json(base_url, LATEST_PATH, build_latest_market_request(selection), headers, timeout, browser_session)
     latest_rows = require_success(latest_response, LATEST_PATH)
     if not isinstance(latest_rows, list):
         raise RuntimeError("latest market response has no data list; stopped before bet")
@@ -323,7 +325,7 @@ def submit_test_bet(selection, stake, timeout=15, cross_odds_refresh=None):
     if not isinstance(odds_value, (int, float)) or int(odds_value) <= 100000:
         raise RuntimeError("latest odds value is invalid; stopped before bet")
 
-    limit_response = post_json(base_url, LIMIT_PATH, build_limit_request(selection, int(odds_value)), headers, timeout)
+    limit_response = post_json(base_url, LIMIT_PATH, build_limit_request(selection, int(odds_value)), headers, timeout, browser_session)
     limit_rows = require_success(limit_response, LIMIT_PATH)
     if not isinstance(limit_rows, list) or not limit_rows or not limit_rows[0].get("minBet"):
         raise RuntimeError("stake limit response is incomplete; stopped before bet")
@@ -338,8 +340,10 @@ def submit_test_bet(selection, stake, timeout=15, cross_odds_refresh=None):
         raise RuntimeError("stake exceeds OP7_TEST_BET_MAX_STAKE; stopped before bet")
 
     payload = build_bet_payload(selection, amount, odds_value=int(odds_value))
+    if cross_odds_refresh is None and browser_session is not None:
+        cross_odds_refresh = lambda: browser_session.refresh_cross_odds(selection)
     if cross_odds_refresh is None:
-        raise RuntimeError("必须提供双边实时赔率刷新回调；未完成5秒内A/B复核，禁止发送投注")
+        raise RuntimeError("未连接浏览器会话，无法自动刷新 EB/Pingbo 双边赔率；已停止")
     cross_check = refresh_and_validate_cross_odds(cross_odds_refresh, max_seconds=5.0)
     selected_side = str(selection["option"].get("ot") or "").lower()
     if selected_side != cross_check["direction"].lower():
@@ -362,7 +366,7 @@ def submit_test_bet(selection, stake, timeout=15, cross_odds_refresh=None):
         "cross_check": {k: v for k, v in cross_check.items() if k != "snapshot"},
     })
     try:
-        bet_response = post_json(base_url, BET_PATH, payload, headers, timeout)
+        bet_response = post_json(base_url, BET_PATH, payload, headers, timeout, browser_session)
         parsed_result = parse_bet_result(bet_response)
     except Exception as exc:
         # A timeout/error after POST is an unknown outcome. Never auto-retry.
@@ -407,7 +411,14 @@ def main():
     args = parser.parse_args()
     selection = json.loads(Path(args.input).read_text(encoding="utf-8"))
     if args.submit_test:
-        print(json.dumps(submit_test_bet(selection, args.stake, args.timeout), ensure_ascii=False, indent=2))
+        from op7_browser_session_bridge import BrowserSessionBridge
+        with BrowserSessionBridge(profiles_dir="browser_profiles", timeout=args.timeout) as browser_session:
+            result = submit_test_bet(
+                selection, args.stake, args.timeout,
+                cross_odds_refresh=lambda: browser_session.refresh_cross_odds(selection),
+                browser_session=browser_session,
+            )
+        print(json.dumps(result, ensure_ascii=False, indent=2))
     else:
         print(json.dumps(redact(build_bet_payload(selection, args.stake)), ensure_ascii=False, indent=2))
         print("\nDRY RUN ONLY: no network request was sent.")
