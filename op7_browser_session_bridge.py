@@ -162,16 +162,6 @@ def _resolve_runtime_fields(sources, event_id, market=None, group=None):
             found = _walk_field_values(scan_payload, aliases)
             values.extend((value, f"{source_name}:{where}") for value, where in found[field])
         distinct = {value for value, _ in values}
-        if not distinct and field == "device_imei":
-            # Read-only NBA discovery does not need a device identifier.
-            # Keep it absent rather than inventing a value; any bet payload
-            # still requires an explicitly supplied local-session device_imei.
-            continue
-        if not distinct and field == "match_type":
-            # Read-only NBA discovery reports market selections without building
-            # API requests. Keep match_type absent rather than guessing it;
-            # request/payload builders must still require an explicit live value.
-            continue
         if not distinct:
             raise RuntimeError(f"赛事 {event_id} 详情上下文缺少字段 {field}；拒绝使用默认值")
         if len(distinct) != 1:
@@ -928,13 +918,11 @@ class BrowserSessionBridge:
                                 )
                             continue
                         diagnostics["complete_options"] += 1
-                        # Read-only discovery needs only the live event/market/group/option
-                        # fields above. Do not resolve bet-only runtime parameters here:
-                        # match_type, device_imei and market_type_finally are not needed
-                        # to display candidate totals and must never be guessed.
+                        runtime_context = self.runtime_context_for_event(
+                            event["mid"], market=market, group=group)
                         selections.append({
                             "event": event, "market": market, "group": group,
-                            "option": option,
+                            "option": option, "runtime_context": runtime_context,
                         })
         if not selections:
             print("\\n=== EB NBA 大小分字段诊断（仅字段名和计数，不含请求凭证或原始响应） ===")
