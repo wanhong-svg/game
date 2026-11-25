@@ -325,10 +325,12 @@ def main():
  policy=json.loads(Path(a.policy).read_text(encoding='utf-8'))
  intervals=policy.get('intervals_seconds',{})
  a.fb_list_interval=a.fb_list_interval or intervals.get('FB_event_list',30)
- a.fb_odds_interval=20
+ a.fb_odds_interval=intervals.get('FB_single_event_odds',20)
  a.eb_list_interval=a.eb_list_interval or intervals.get('EB_event_list',5)
- a.eb_odds_interval=20
- a.pingbo_interval=20
+ # EB odds and Pingbo event+embedded-odds refresh share one policy interval.
+ eb_pingbo_interval=intervals.get('EB_Pingbo_shared_interval',20)
+ a.eb_odds_interval=eb_pingbo_interval
+ a.pingbo_interval=eb_pingbo_interval
  vals=[a.fb_list_interval,a.eb_list_interval,a.timeout]
  if min(vals)<5: ap.error('赛事列表刷新间隔及超时不得低于5秒')
  cfg=json.loads(Path(a.config).read_text(encoding='utf-8'))
