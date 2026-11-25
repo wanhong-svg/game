@@ -111,11 +111,15 @@ def _find_pingbo_event(payload, event):
         # User rule: full-name/short-name cases require an exact temporal anchor.
         # All cases use exact kickoff equality when both source timestamps exist;
         # otherwise a complete live period+clock+score signature must match.
-        if target_time is not None and stamp is not None:
-            temporal_match = target_time == stamp
-        else:
-            pb_progress = _event_progress_signature(item.get("_raw_event") or item)
-            temporal_match = eb_progress is not None and pb_progress is not None and eb_progress == pb_progress
+        kickoff_match = target_time is not None and stamp is not None and target_time == stamp
+        pb_progress = _event_progress_signature(item.get("_raw_event") or item)
+        progress_match = (
+            eb_progress is not None and pb_progress is not None
+            and eb_progress == pb_progress
+        )
+        # Either exact kickoff timestamp or a complete, identical live-state
+        # signature is sufficient; partial/missing progress never counts.
+        temporal_match = kickoff_match or progress_match
         if not temporal_match:
             continue
         candidates.append(item)
