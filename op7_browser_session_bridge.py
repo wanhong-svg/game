@@ -195,13 +195,13 @@ def _resolve_runtime_fields(sources, event_id, market=None, group=None):
 
 def _console_prompt(message):
     """Show required browser-operation prompts even while diagnostic stdout is suppressed."""
-    sys.__stdout__.write("\\n" + str(message).strip() + "\\n")
+    sys.__stdout__.write("\n" + str(message).strip() + "\n")
     sys.__stdout__.flush()
     return input()
 
 
 def _console_stage(message):
-    sys.__stdout__.write("[执行节点] " + str(message).strip() + "\\n")
+    sys.__stdout__.write("[执行节点] " + str(message).strip() + "\n")
     sys.__stdout__.flush()
 
 
@@ -325,6 +325,7 @@ class BrowserSessionBridge:
             # Install in the current document and every subsequent navigation.
             page.add_init_script(_PAGE_AUTO_SCROLL_SCRIPT)
             page.evaluate(_PAGE_AUTO_SCROLL_SCRIPT)
+            _console_stage(f"{family} 页面已启用自动滚动：每 60 秒上滑/下滑交替一次。")
         except Exception as exc:
             _console_stage(f"{family} 页面自动滚动未能启用：{type(exc).__name__}")
         if family == "op7":
