@@ -7,6 +7,7 @@ never writes cookies, authorization headers, request bodies, or device identifie
 to the endpoint configuration file.
 """
 import json
+import re
 import sys
 import time
 from decimal import Decimal
