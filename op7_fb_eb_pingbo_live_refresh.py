@@ -56,22 +56,50 @@ class AuthenticationRequired(RuntimeError):
 CAPTURED_REQUESTS={}
 CAPTURED_ORIGINS={}
 
+def persist_observed_endpoint(api_family, origin, host, path):
+ """Persist discovered API routing metadata; never persist request headers or credentials."""
+ config_path=Path(__file__).with_name('endpoints.json')
+ config=json.loads(config_path.read_text(encoding='utf-8'))
+ api=config.setdefault('apis',{}).setdefault(api_family,{})
+ changed=False
+ if api.get('base_url') != origin:
+  api['base_url']=origin; changed=True
+ hosts=api.setdefault('hosts',[])
+ if host not in hosts:
+  hosts.append(host); hosts.sort(); changed=True
+ observed=api.setdefault('observed_paths',[])
+ if path not in observed:
+  observed.append(path); observed.sort(); changed=True
+ api['last_observed_at_utc']=now()
+ if changed or not config_path.exists():
+  tmp=config_path.with_suffix('.json.tmp')
+  tmp.write_text(json.dumps(config,ensure_ascii=False,indent=2)+'\\n',encoding='utf-8')
+  tmp.replace(config_path)
+ ENDPOINTS.clear(); ENDPOINTS.update(config)
+
+
 def capture_request(request, family):
  try:
   p=urllib.parse.urlsplit(request.url)
   known_paths={path for paths in ALLOW.values() for path in paths}
-  if p.scheme!='https' or p.path not in known_paths: return
+  # Only capture the configured API paths; browser assets and unrelated requests are ignored.
+  if p.scheme not in ('http','https') or p.path not in known_paths: return
   api_family='pingbo' if p.path.startswith('/sports-service/') else ('eb' if p.path.startswith('/yewu11/') else 'fb')
+  if request.method not in ('GET','POST'): return
   key=(api_family,p.path)
   headers={k:v for k,v in request.headers.items()
-   if k.lower() not in {'cookie','host','content-length','connection','accept-encoding','transfer-encoding'}
+   if k.lower() not in {'cookie','host','content-length','connection','accept-encoding','transfer-encoding','authorization'}
    and not k.lower().startswith('sec-')}
   CAPTURED_REQUESTS[key]={'method':request.method,'url':request.url,'headers':headers,'post_data':request.post_data}
-  CAPTURED_ORIGINS[api_family]=f'{p.scheme}://{p.netloc}'
-  # Permit only this host/path pair after observing the request in the browser.
-  ALLOW.setdefault(p.netloc,set()).add(p.path)
- except Exception:
-  return
+  origin=f'{p.scheme}://{p.netloc}'
+  CAPTURED_ORIGINS[api_family]=origin
+  # Persist only routing metadata. Session headers, cookies, tokens and request bodies stay in memory.
+  persist_observed_endpoint(api_family,origin,p.netloc,p.path)
+  # Keep the runtime allowlist synchronized with the observed API host.
+  api=ENDPOINTS.get('apis',{}).get(api_family,{})
+  ALLOW[p.netloc]=set(api.get('read_paths',[]))
+ except Exception as exc:
+  print(f'浏览器请求捕获/配置更新失败：{type(exc).__name__}: {exc}',file=sys.stderr)
 
 def request_json(ctx,url,method,headers,params=None,body=None,timeout_ms=15000,family=None):
  p=urllib.parse.urlsplit(url)
