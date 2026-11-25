@@ -5,7 +5,8 @@
     "FB_single_event_odds": 20,
     "EB_event_list": 5,
     "EB_single_event_odds": 20,
-    "Pingbo_event_list_and_embedded_odds": 20
+    "Pingbo_event_list_and_embedded_odds": 20,
+    "EB_Pingbo_shared_interval": 20
   },
   "limits": {
     "FB_events_per_odds_cycle": 8,
