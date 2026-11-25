@@ -16,6 +16,7 @@ from pathlib import Path
 
 ENDPOINTS = json.loads((Path(__file__).with_name("endpoints.json")).read_text(encoding="utf-8"))
 ORDER_AUDIT_PATH = Path(__file__).with_name("bet_order_audit.json")
+MAX_SUCCESSFUL_BETS_PER_EVENT = 5
 LATEST_PATH, LIMIT_PATH, BET_PATH = ENDPOINTS["apis"]["eb"]["bet_paths"]
 
 
@@ -209,6 +210,27 @@ def _candidate_key(selection):
         option.get("oid"), option.get("ot"), group.get("hv")
     ))
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _successful_bet_counts():
+    """Count only confirmed ACCEPTED orders, grouped by stable EB event ID."""
+    if not ORDER_AUDIT_PATH.exists():
+        return {}
+    try:
+        payload = json.loads(ORDER_AUDIT_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        raise RuntimeError("bet order audit file is unreadable; refusing to apply event limits")
+    records = payload.get("records") if isinstance(payload, dict) else None
+    if not isinstance(records, list):
+        raise RuntimeError("bet order audit file has invalid structure")
+    counts = {}
+    for record in records:
+        if not isinstance(record, dict) or record.get("state") != "ACCEPTED":
+            continue
+        event_id = str(record.get("event_id") or "").strip()
+        if event_id:
+            counts[event_id] = counts.get(event_id, 0) + 1
+    return counts
 
 
 def _write_order_audit(record):
@@ -475,6 +497,20 @@ def _write_selection_file(selection, output_path):
 
 def auto_run_once(browser_session, stake, timeout, output_path):
     """Discover live NBA totals, rank fresh cross-book opportunities, and submit at most one."""
+    successful_counts = _successful_bet_counts()
+    ignored_event_ids = {
+        event_id for event_id, count in successful_counts.items()
+        if count >= MAX_SUCCESSFUL_BETS_PER_EVENT
+    }
+    browser_session.set_ignored_event_ids(ignored_event_ids)
+    if ignored_event_ids:
+        print(
+            "[EVENT_LIMIT_FILTER]",
+            f"ignored_events={len(ignored_event_ids)}",
+            f"limit={MAX_SUCCESSFUL_BETS_PER_EVENT}",
+            "count_basis=confirmed_success_only",
+            flush=True,
+        )
     candidates = browser_session.discover_nba_total_selections()
     if not candidates:
         raise RuntimeError("没有发现可用的 NBA 全场大小分候选；本轮未提交")
