@@ -19,6 +19,10 @@ ORDER_AUDIT_PATH = Path(__file__).with_name("bet_order_audit.json")
 LATEST_PATH, LIMIT_PATH, BET_PATH = ENDPOINTS["apis"]["eb"]["bet_paths"]
 
 
+def load_runtime_endpoints():
+    return json.loads(Path(__file__).with_name("endpoints.json").read_text(encoding="utf-8"))
+
+
 def as_decimal(value):
     try:
         return Decimal(str(value))
@@ -243,10 +247,11 @@ def _allowed_test_host(host):
     if host in explicit:
         return True
     # Project owner has designated the configured API hosts as their managed test environment.
-    configured = set(ENDPOINTS.get("apis", {}).get("eb", {}).get("hosts", []))
+    runtime = load_runtime_endpoints()
+    configured = set(runtime.get("apis", {}).get("eb", {}).get("hosts", []))
     discovered = {
         str(x.get("host", "")).lower().rstrip(".")
-        for x in ENDPOINTS.get("discovered_endpoints", [])
+        for x in runtime.get("discovered_endpoints", [])
         if x.get("family") == "eb"
     }
     if host in configured | discovered:
@@ -311,7 +316,9 @@ def require_success(response, endpoint):
 
 
 def submit_test_bet(selection, stake, timeout=15, cross_odds_refresh=None, browser_session=None):
-    base_url = validate_test_target(os.environ.get("OP7_TEST_BET_BASE_URL", ENDPOINTS["apis"]["eb"].get("bet_api_base_url") or ENDPOINTS["apis"]["eb"]["base_url"]))
+    runtime_endpoints = load_runtime_endpoints()
+    eb_config = runtime_endpoints["apis"]["eb"]
+    base_url = validate_test_target(os.environ.get("OP7_TEST_BET_BASE_URL", eb_config.get("bet_api_base_url") or eb_config["base_url"]))
     headers = _headers()
     latest_response = post_json(base_url, LATEST_PATH, build_latest_market_request(selection), headers, timeout, browser_session)
     latest_rows = require_success(latest_response, LATEST_PATH)
