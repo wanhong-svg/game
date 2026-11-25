@@ -928,11 +928,13 @@ class BrowserSessionBridge:
                                 )
                             continue
                         diagnostics["complete_options"] += 1
-                        runtime_context = self.runtime_context_for_event(
-                            event["mid"], market=market, group=group)
+                        # Read-only discovery needs only the live event/market/group/option
+                        # fields above. Do not resolve bet-only runtime parameters here:
+                        # match_type, device_imei and market_type_finally are not needed
+                        # to display candidate totals and must never be guessed.
                         selections.append({
                             "event": event, "market": market, "group": group,
-                            "option": option, "runtime_context": runtime_context,
+                            "option": option,
                         })
         if not selections:
             print("\\n=== EB NBA 大小分字段诊断（仅字段名和计数，不含请求凭证或原始响应） ===")
