@@ -99,7 +99,7 @@ def _find_pingbo_totals(event, target_line):
 
 
 def _decode_api_response(raw):
-    """Decode the API envelope; data may be Base64(gzip(JSON))."""
+    """Match ob-decoder.html: Base64 then gzip/deflate, UTF-8 JSON, URI-decoded JSON fallback."""
     if isinstance(raw, (bytes, bytearray)):
         raw = raw.decode("utf-8", "replace")
     envelope = json.loads(raw) if isinstance(raw, str) else raw
@@ -107,18 +107,22 @@ def _decode_api_response(raw):
         return envelope
     import base64
     import gzip
+    import zlib
     import binascii
-    encoded = "".join(envelope["data"].split())
+    encoded = "".join(envelope["data"].split()).replace("-", "+").replace("_", "/")
     try:
-        packed = base64.b64decode(encoded, validate=True)
+        packed = base64.b64decode(encoded + "=" * (-len(encoded) % 4), validate=True)
         try:
             decoded = gzip.decompress(packed)
         except OSError:
-            decoded = packed
-        payload = json.loads(decoded.decode("utf-8"))
-    except (ValueError, OSError, UnicodeDecodeError, binascii.Error, json.JSONDecodeError):
-        # Never silently treat an undecoded opaque payload as a valid detail object.
-        raise RuntimeError("接口 data 字段不是可验证的 Base64/GZIP JSON") from None
+            decoded = zlib.decompress(packed)
+        decoded_text = decoded.decode("utf-8")
+        try:
+            payload = json.loads(decoded_text)
+        except json.JSONDecodeError:
+            payload = json.loads(unquote(decoded_text))
+    except (ValueError, OSError, zlib.error, UnicodeDecodeError, binascii.Error, json.JSONDecodeError):
+        raise RuntimeError("ob-decoder.html 解码规则执行失败：data 不是有效的 Base64 + GZIP/zlib JSON") from None
     result = dict(envelope)
     result["data"] = payload
     return result
