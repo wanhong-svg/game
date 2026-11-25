@@ -210,6 +210,8 @@ class BrowserSessionBridge:
         self._request_templates_by_id = {}
         self._request_templates_by_signature = {}
         self._nba_capture_started = 0.0
+        self._nba_list_template = None
+        self._nba_list_path = None
         self._attached_pages = {"op7": set(), "pingbo": set()}
         self._ignored_event_ids = set()
 
@@ -754,69 +756,102 @@ class BrowserSessionBridge:
             "/yewu11/v1/m/matchesPagePB",
             "/yewu11/v1/m/noLiveMatchesPagePB",
         )
-        input(
-            "请先在 OP7 浏览器进入「篮球 / NBA 正规赛事」列表；"
-            "确认页面已打开后回到终端按 Enter，脚本随后开始捕获最新列表请求："
-        )
-
-        # Drain callbacks queued while input() blocked Playwright's event loop.
-        for page in list(self.op7.pages):
-            try:
-                page.wait_for_timeout(500)
-            except Exception:
-                pass
-
-        # Pre-confirmation templates and responses are not eligible for this run.
-        self._nba_capture_started = time.monotonic()
-        self._list_responses.clear()
-        for endpoint in target_paths:
-            live.CAPTURED_REQUESTS.pop(("eb", endpoint), None)
-
-        wait_seconds = 30.0
-        print(
-            "请现在刷新一次当前 NBA 列表页；"
-            f"脚本将持续等待并捕获 matchesPagePB 或 noLiveMatchesPagePB 的请求（至少 {int(wait_seconds)} 秒）...",
-            flush=True,
-        )
-        # Keep listening for the full window so late pagination/refresh requests
-        # are included; the newest captured request is selected after the window.
-        deadline = time.monotonic() + wait_seconds
-        while time.monotonic() < deadline:
+        if not getattr(self, "_nba_list_template", None):
+            input(
+                "请先在 OP7 浏览器进入「篮球 / NBA 正规赛事」列表；"
+                "确认页面已打开后回到终端按 Enter，脚本随后开始捕获最新列表请求："
+            )
+    
+            # Drain callbacks queued while input() blocked Playwright's event loop.
             for page in list(self.op7.pages):
                 try:
-                    page.wait_for_timeout(250)
+                    page.wait_for_timeout(500)
                 except Exception:
                     pass
-            if not self.op7.pages:
-                break
-
-        if not self._list_responses:
-            raise RuntimeError(
-                "确认进入 NBA 列表页后，未捕获到新的 matchesPagePB 或 "
-                "noLiveMatchesPagePB 请求；请确认列表已加载，并在提示后刷新页面重试。"
+    
+            # Pre-confirmation templates and responses are not eligible for this run.
+            self._nba_capture_started = time.monotonic()
+            self._list_responses.clear()
+            for endpoint in target_paths:
+                live.CAPTURED_REQUESTS.pop(("eb", endpoint), None)
+    
+            wait_seconds = 30.0
+            print(
+                "请现在刷新一次当前 NBA 列表页；"
+                f"脚本将持续等待并捕获 matchesPagePB 或 noLiveMatchesPagePB 的请求（至少 {int(wait_seconds)} 秒）...",
+                flush=True,
             )
-
-        # If both endpoints were observed, select the one with the latest request timestamp.
-        selected_path, selected_record = max(
-            self._list_responses.items(),
-            key=lambda item: item[1]["captured_at"],
-        )
-        path = selected_path
-        template = selected_record["request_template"]
-        print(
-            "[EB_NBA_LIST_SOURCE]",
-            f"endpoint={path.rsplit('/', 1)[-1]}",
-            "source=post_confirmation_latest_request",
-            flush=True,
-        )
-        capture_status = live.eb_nba_capture_status()
-        print("\n=== EB NBA 页面监听状态 ===")
-        for endpoint, state in capture_status.items():
-            short_name = endpoint.rsplit("/", 1)[-1]
-            mark = "✓" if state["captured"] else ("已触发/未捕获" if state["seen"] else "未触发")
-            print(f"[{mark}] {short_name} method={state['method'] or '-'}")
-        print("页面状态：已确认进入 EB NBA 列表页")
-        print("检测状态：已捕获本轮最新列表请求")
+            # Keep listening for the full window so late pagination/refresh requests
+            # are included; the newest captured request is selected after the window.
+            deadline = time.monotonic() + wait_seconds
+            while time.monotonic() < deadline:
+                for page in list(self.op7.pages):
+                    try:
+                        page.wait_for_timeout(250)
+                    except Exception:
+                        pass
+                if not self.op7.pages:
+                    break
+    
+            if not self._list_responses:
+                raise RuntimeError(
+                    "确认进入 NBA 列表页后，未捕获到新的 matchesPagePB 或 "
+                    "noLiveMatchesPagePB 请求；请确认列表已加载，并在提示后刷新页面重试。"
+                )
+    
+            # If both endpoints were observed, select the one with the latest request timestamp.
+            selected_path, selected_record = max(
+                self._list_responses.items(),
+                key=lambda item: item[1]["captured_at"],
+            )
+            path = selected_path
+            template = selected_record["request_template"]
+            print(
+                "[EB_NBA_LIST_SOURCE]",
+                f"endpoint={path.rsplit('/', 1)[-1]}",
+                "source=post_confirmation_latest_request",
+                flush=True,
+            )
+            capture_status = live.eb_nba_capture_status()
+            print("\n=== EB NBA 页面监听状态 ===")
+            for endpoint, state in capture_status.items():
+                short_name = endpoint.rsplit("/", 1)[-1]
+                mark = "✓" if state["captured"] else ("已触发/未捕获" if state["seen"] else "未触发")
+                print(f"[{mark}] {short_name} method={state['method'] or '-'}")
+            print("页面状态：已确认进入 EB NBA 列表页")
+            print("检测状态：已捕获本轮最新列表请求")
+    
+            self._nba_list_template = template
+            self._nba_list_path = path
+        else:
+            # Subsequent polling rounds reuse the authenticated browser-captured
+            # request shape but fetch a fresh current-day NBA list from EB.
+            path = self._nba_list_path
+            template = self._nba_list_template
+            try:
+                if template.get("method") == "GET":
+                    body = dict(parse_qsl(urlsplit(template.get("url", "")).query, keep_blank_values=True))
+                else:
+                    body = json.loads(template.get("post_data") or "{}")
+            except Exception:
+                raise RuntimeError("无法解析已捕获的 EB 赛事列表请求参数") from None
+            if not isinstance(body, dict):
+                raise RuntimeError("EB 赛事列表请求参数不是对象")
+            body.setdefault("cpn", 1)
+            body.setdefault("cps", 50)
+            origin = live.CAPTURED_ORIGINS.get("eb", live.SITES["EB_ORIGIN"])
+            response = live.request_json(
+                self.op7, origin + path, template.get("method", "POST"),
+                live.headers_env("OP7_READONLY_HEADERS_JSON"),
+                params=body if template.get("method") == "GET" else None,
+                body=body if template.get("method") == "POST" else None,
+                timeout_ms=self.timeout * 1000, family="eb",
+            )
+            selected_record = {
+                "request_template": template,
+                "response": response,
+                "captured_at": time.time(),
+            }
         try:
             if template.get("method") == "GET":
                 body = dict(parse_qsl(urlsplit(template.get("url", "")).query, keep_blank_values=True))
