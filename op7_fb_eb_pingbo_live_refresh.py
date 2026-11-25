@@ -245,6 +245,37 @@ def save_latest(out,name,payload,status='SUCCESS',details=None):
  tmp.replace(p)
  (out/(name+'_status.json')).write_text(json.dumps({'status':status,'observed_at_utc':stamp,'details':details or {},'error':None},ensure_ascii=False,indent=2),encoding='utf-8')
 
+def _market_cache_key(row):
+ # Totals are keyed without the line so a changed line replaces the previous line.
+ venue=str(row.get('venue') or '')
+ event=str(row.get('event_id') or '')
+ market_id=str(row.get('market_id') or '')
+ market_type=str(row.get('market_type_mty',row.get('play_id_hpid')) or '')
+ market_key=str(row.get('market_key') or '')
+ label=' '.join(str(row.get(k) or '') for k in ('market_name','market_label','play_id_hpid','market_type_mty')).lower()
+ is_total=(market_key=='1' or any(token in label for token in
+  ('大小','总分','總分','total','over/under','over under','totals')))
+ if is_total:
+  return ('TOTAL',venue,event,market_id,market_type,market_key,
+          str(row.get('side') or ''),str(row.get('selection_id') or ''))
+ return ('MARKET',venue,event,market_id,market_type,
+         str(row.get('group_id') or ''),str(row.get('line',row.get('line_hv')) or ''),
+         market_key,str(row.get('side') or ''),str(row.get('selection_id') or ''))
+
+def update_market_cache(cache, venue, rows, active_event_ids, observed_at):
+ # One current record per event/market/selection. Replacing a record refreshes
+ # its timestamp whether odds changed or not; no historical copies are retained.
+ active={str(x) for x in active_event_ids}
+ for key,row in list(cache.items()):
+  if key[2] not in active:
+   del cache[key]
+ for source in rows:
+  row=dict(source)
+  row['observed_at_utc']=observed_at
+  key=_market_cache_key(row)
+  cache[key]=row
+ return list(cache.values())
+
 def save_failure(out,name,error):
  out.mkdir(parents=True,exist_ok=True)
  status='AUTH_REQUIRED' if isinstance(error,AuthenticationRequired) else 'FAILED'
@@ -294,12 +325,12 @@ def main():
  policy=json.loads(Path(a.policy).read_text(encoding='utf-8'))
  intervals=policy.get('intervals_seconds',{})
  a.fb_list_interval=a.fb_list_interval or intervals.get('FB_event_list',30)
- a.fb_odds_interval=a.fb_odds_interval or intervals.get('FB_single_event_odds',6)
+ a.fb_odds_interval=20
  a.eb_list_interval=a.eb_list_interval or intervals.get('EB_event_list',5)
- a.eb_odds_interval=a.eb_odds_interval or intervals.get('EB_single_event_odds',5)
- a.pingbo_interval=a.pingbo_interval or intervals.get('Pingbo_event_list_and_embedded_odds',20)
- vals=[a.fb_list_interval,a.fb_odds_interval,a.eb_list_interval,a.eb_odds_interval,a.pingbo_interval,a.timeout]
- if min(vals)<5: ap.error('刷新间隔及超时不得低于5秒')
+ a.eb_odds_interval=20
+ a.pingbo_interval=20
+ vals=[a.fb_list_interval,a.eb_list_interval,a.timeout]
+ if min(vals)<5: ap.error('赛事列表刷新间隔及超时不得低于5秒')
  cfg=json.loads(Path(a.config).read_text(encoding='utf-8'))
  op=cfg.get('op7',{}); pb=cfg.get('part567',{})
  fb_body=op.get('fb_list_body',{'size':50,'sportId':1,'type':1,'orderBy':1,'current':1,'isPC':True,'languageType':'CMN'})
@@ -309,7 +340,7 @@ def main():
  if not all(isinstance(x,dict) for x in (fb_body,fb_detail,eb_body,eb_q,pb_q)): raise ValueError('All request parameter blocks must be JSON objects')
  if not a.live:
   print(json.dumps({'mode':'DRY_RUN_NO_NETWORK','endpoints':{'FB':'getList POST + getMatchDetail POST','EB':'matchesPagePB POST + getMatchOddsInfoPB GET','Pingbo':'compact/events GET'},
-   'refresh_seconds':{'FB_list':a.fb_list_interval,'FB_odds':a.fb_odds_interval,'EB_list':a.eb_list_interval,'EB_odds':a.eb_odds_interval,'Pingbo_events_and_embedded_odds':a.pingbo_interval},
+   'refresh_seconds':{'FB_list':a.fb_list_interval,'FB_odds':20,'EB_list':a.eb_list_interval,'EB_odds':20,'Pingbo_events_and_embedded_odds':20},
    'max_events':{'FB':a.fb_max_events,'EB':a.eb_max_events},'bet_or_order_endpoints':'NOT ALLOWED'},ensure_ascii=False,indent=2)); return
  profiles=Path(a.profiles_dir); (profiles/'op7').mkdir(parents=True,exist_ok=True); (profiles/'pingbo').mkdir(parents=True,exist_ok=True)
  out=Path(a.out); oh=headers_env('OP7_READONLY_HEADERS_JSON'); ph=headers_env('PINGBO_READONLY_HEADERS_JSON')
@@ -328,7 +359,7 @@ def main():
    if 'fb' in CAPTURED_ORIGINS: SITES['FB_ORIGIN']=CAPTURED_ORIGINS['fb']
    if 'eb' in CAPTURED_ORIGINS: SITES['EB_ORIGIN']=CAPTURED_ORIGINS['eb']
    if 'pingbo' in CAPTURED_ORIGINS: SITES['PINGBO_ORIGIN']=CAPTURED_ORIGINS['pingbo']
-   fb_list=[]; eb_list=[]; pb_list=[]; clocks={'fb_list':0,'fb_odds':0,'eb_list':0,'eb_odds':0,'pb':0}; started=time.monotonic()
+   fb_list=[]; eb_list=[]; pb_list=[]; market_cache={'FB':{},'EB':{},'PINGBO':{}}; clocks={'fb_list':0,'fb_odds':0,'eb_list':0,'eb_odds':0,'pb':0}; started=time.monotonic()
    print('只读实时刷新已启动；不会调用投注、订单、钱包或资金接口。Ctrl+C停止。')
    while True:
     auth_failure=None
@@ -369,8 +400,9 @@ def main():
       for event in pb_list: event['observed_at_utc']=fetched_at
       normalized=[{k:v for k,v in x.items() if not k.startswith('_')} for x in pb_list]
       pb_markets=[r for x in pb_list for r in mapper.flatten_pingbo_markets(x)]
+      pb_markets=update_market_cache(market_cache['PINGBO'],'PINGBO',pb_markets,[x['event_id'] for x in pb_list],fetched_at)
       save_latest(out,'Pingbo_events',{'events':normalized,'markets':pb_markets}); clocks['pb']=time.monotonic()
-      print(f'[{now()}] Pingbo赛事+内嵌盘口刷新：{len(pb_list)}场 / {len(pb_markets)}条盘口选项')
+      print(f'[{now()}] Pingbo赛事+内嵌盘口刷新：{len(pb_list)}场 / {len(pb_markets)}条当前盘口记录')
      except Exception as e:
       save_failure(out,'Pingbo_events',e); print(f'Pingbo刷新失败：{type(e).__name__}: {e}',file=sys.stderr)
       if isinstance(e,AuthenticationRequired): auth_failure=e
@@ -391,6 +423,7 @@ def main():
      if auth_failure:
       save_failure(out,'FB_markets',auth_failure)
      else:
+      rows=update_market_cache(market_cache['FB'],'FB',rows,[x['id'] for x in fb_list],now())
       save_latest(out,'FB_markets',rows,'PARTIAL' if failed_events else 'SUCCESS',{'failed_events':failed_events})
      clocks['fb_odds']=time.monotonic()
      print(f'[{now()}] FB盘口刷新：{len(rows)}组盘口')
@@ -412,6 +445,7 @@ def main():
      if auth_failure:
       save_failure(out,'EB_markets',auth_failure)
      else:
+      rows=update_market_cache(market_cache['EB'],'EB',rows,[x['id'] for x in eb_list],observed_at)
       save_latest(out,'EB_markets',rows,'PARTIAL' if failed_events else 'SUCCESS',{'failed_events':failed_events})
      clocks['eb_odds']=time.monotonic()
      print(f'[{now()}] EB盘口刷新：{len(rows)}组盘口')
