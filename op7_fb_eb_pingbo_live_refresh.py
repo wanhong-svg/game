@@ -71,7 +71,7 @@ def persist_observed_endpoint(api_family, origin, host, path, resource_type=None
   discovered.append(entry)
  discovered.sort(key=lambda x:(x.get('family',''),x.get('host',''),x.get('path','')))
  tmp=config_path.with_suffix('.json.tmp')
- tmp.write_text(json.dumps(config,ensure_ascii=False,indent=2)+'\\n',encoding='utf-8')
+ tmp.write_text(json.dumps(config,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
  tmp.replace(config_path)
  ENDPOINTS.clear(); ENDPOINTS.update(config)
 
