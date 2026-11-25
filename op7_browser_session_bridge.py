@@ -455,7 +455,12 @@ class BrowserSessionBridge:
             flush=True,
         )
         deadline = time.monotonic() + 20.0
-        while time.monotonic() < deadline and not self._list_responses:
+        first_response_at = None
+        while time.monotonic() < deadline:
+            if self._list_responses and first_response_at is None:
+                first_response_at = time.monotonic()
+            if first_response_at is not None and time.monotonic() - first_response_at >= 1.5:
+                break
             for page in list(self.op7.pages):
                 try:
                     page.wait_for_timeout(250)
@@ -492,11 +497,14 @@ class BrowserSessionBridge:
         print("页面状态：已确认进入 EB NBA 列表页")
         print("检测状态：已捕获本轮最新列表请求")
         try:
-            body = json.loads(template.get("post_data") or "{}")
+            if template.get("method") == "GET":
+                body = dict(parse_qsl(urlsplit(template.get("url", "")).query, keep_blank_values=True))
+            else:
+                body = json.loads(template.get("post_data") or "{}")
         except Exception:
             raise RuntimeError("无法解析浏览器捕获的 EB 赛事列表请求参数") from None
         if not isinstance(body, dict):
-            raise RuntimeError("EB 赛事列表请求体不是 JSON 对象")
+            raise RuntimeError("EB 赛事列表请求参数不是对象")
         body.setdefault("cpn", 1)
         body.setdefault("cps", 50)
         try:
@@ -544,7 +552,8 @@ class BrowserSessionBridge:
                 response = live.request_json(
                     self.op7, origin + path, template.get("method", "POST"),
                     live.headers_env("OP7_READONLY_HEADERS_JSON"),
-                    params=None, body=body if template.get("method") == "POST" else None,
+                    params=body if template.get("method") == "GET" else None,
+                    body=body if template.get("method") == "POST" else None,
                     timeout_ms=self.timeout * 1000, family="eb")
             data = live.data_of(response)
             response_schema_samples.append({
