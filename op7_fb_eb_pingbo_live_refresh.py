@@ -158,7 +158,25 @@ def capture_request(request, family):
   eb_api=ENDPOINTS.get('apis',{}).get('eb',{})
   eb_allowed=set(eb_api.get('read_paths',[])+eb_api.get('bet_paths',[]))
   known_paths={path for api in ENDPOINTS.get('apis',{}).values() for path in (api.get('read_paths',[])+api.get('bet_paths',[]))}
+  query_params=urllib.parse.parse_qs(p.query, keep_blank_values=True)
+  if api_family=='pingbo' and request.method=='POST' and getattr(request,'post_data',None):
+   try:
+    posted=request.post_data
+    if posted.lstrip().startswith('{'):
+     body_params=json.loads(posted)
+     if isinstance(body_params,dict):
+      query_params.update({str(k):[str(v)] for k,v in body_params.items()})
+    else:
+     query_params.update(urllib.parse.parse_qs(posted, keep_blank_values=True))
+   except Exception:
+    pass
+  pingbo_nba_feed=(api_family=='pingbo'
+   and p.path in ('/sports-service/sv/mobile/odds-live','/sports-service/sv/mobile/odds-today')
+   and query_params.get('sportId')==['4']
+   and query_params.get('leagueIds')==['487'])
   allowed=(p.path in eb_allowed) if api_family=='eb' else (p.path in known_paths)
+  if pingbo_nba_feed:
+   allowed=True
   captured=False
   if allowed and request.method in ('GET','POST'):
    key=(api_family,p.path)
@@ -172,8 +190,10 @@ def capture_request(request, family):
     CAPTURED_ORIGINS[origin_key]=origin
     api=ENDPOINTS.get('apis',{}).get(api_family,{})
     ALLOW[p.netloc]=set(api.get('read_paths',[]))
-  if api_family=='pingbo':
-   print('【pingBo】[CAPTURE]',f'method={request.method}',f'path={p.path}',f'resource_type={resource_type}',f'allowed={allowed}',f'captured={captured}',flush=True)
+   if pingbo_nba_feed:
+    ALLOW[p.netloc].add(p.path)
+  if api_family=='pingbo' and p.path in ('/sports-service/sv/mobile/odds-live','/sports-service/sv/mobile/odds-today'):
+   print('【pingBo】[CAPTURE]',f'method={request.method}',f'path={p.path}',f'sportId={query_params.get("sportId", [])}',f'leagueIds={query_params.get("leagueIds", [])}',f'nba_filter={pingbo_nba_feed}',f'resource_type={resource_type}',f'captured={captured}',flush=True)
   if api_family=='eb' and p.path in EB_NBA_PAGE_ENDPOINTS:
    state=EB_NBA_CAPTURE_STATE[p.path]
    state['seen']=True
