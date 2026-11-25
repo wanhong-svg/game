@@ -187,6 +187,8 @@ class BrowserSessionBridge:
         self.op7 = None
         self.pingbo = None
         self._detail_responses = {}
+        self._list_responses = {}
+        self._nba_capture_started = 0.0
         self._attached_pages = {"op7": set(), "pingbo": set()}
 
     @staticmethod
@@ -285,6 +287,20 @@ class BrowserSessionBridge:
             payload = _decode_api_response(response.text())
             data = payload.get("data") if isinstance(payload, dict) else payload
             short_name = parsed.path.rsplit("/", 1)[-1]
+
+            # Retain only list responses whose request was captured in this fresh epoch.
+            if parsed.path in {
+                "/yewu11/v1/m/matchesPagePB",
+                "/yewu11/v1/m/noLiveMatchesPagePB",
+            }:
+                template = live.CAPTURED_REQUESTS.get(("eb", parsed.path))
+                captured_at = (template or {}).get("captured_at_monotonic", 0.0)
+                if captured_at >= self._nba_capture_started > 0:
+                    self._list_responses[parsed.path] = {
+                        "response": payload,
+                        "request_template": dict(template),
+                        "captured_at": captured_at,
+                    }
 
             # Page-list diagnostics deliberately expose only schema/counts, never raw rows.
             if parsed.path.endswith("/matchesPagePB"):
@@ -411,54 +427,70 @@ class BrowserSessionBridge:
 
     def discover_nba_events(self, max_pages=20):
         """Fetch current EB event pages and return only explicitly identified NBA events."""
-        path = "/yewu11/v1/m/matchesPagePB"
-        input("请在已打开的 OP7 浏览器中手动进入「篮球 / NBA 正规赛事」列表，等待赛事加载完成后回到终端按 Enter：")
-        # The synchronous input() blocks Playwright's event loop. Requests made
-        # while the user is navigating may therefore still be queued when Enter
-        # is pressed. Pump every OP7 page briefly before taking the capture snapshot.
+        target_paths = (
+            "/yewu11/v1/m/matchesPagePB",
+            "/yewu11/v1/m/noLiveMatchesPagePB",
+        )
+        input(
+            "请先在 OP7 浏览器进入「篮球 / NBA 正规赛事」列表；"
+            "确认页面已打开后回到终端按 Enter，脚本随后开始捕获最新列表请求："
+        )
+
+        # Drain callbacks queued while input() blocked Playwright's event loop.
         for page in list(self.op7.pages):
             try:
-                page.wait_for_timeout(2000)
+                page.wait_for_timeout(500)
             except Exception:
                 pass
+
+        # Pre-confirmation templates and responses are not eligible for this run.
+        self._nba_capture_started = time.monotonic()
+        self._list_responses.clear()
+        for endpoint in target_paths:
+            live.CAPTURED_REQUESTS.pop(("eb", endpoint), None)
+
+        print(
+            "请现在刷新一次当前 NBA 列表页；"
+            "脚本正在等待 matchesPagePB 或 noLiveMatchesPagePB 的最新请求（最多 20 秒）...",
+            flush=True,
+        )
+        deadline = time.monotonic() + 20.0
+        while time.monotonic() < deadline and not self._list_responses:
+            for page in list(self.op7.pages):
+                try:
+                    page.wait_for_timeout(250)
+                except Exception:
+                    pass
+            if not self.op7.pages:
+                break
+
+        if not self._list_responses:
+            raise RuntimeError(
+                "确认进入 NBA 列表页后，未捕获到新的 matchesPagePB 或 "
+                "noLiveMatchesPagePB 请求；请确认列表已加载，并在提示后刷新页面重试。"
+            )
+
+        # If both endpoints were observed, select the one with the latest request timestamp.
+        selected_path, selected_record = max(
+            self._list_responses.items(),
+            key=lambda item: item[1]["captured_at"],
+        )
+        path = selected_path
+        template = selected_record["request_template"]
+        print(
+            "[EB_NBA_LIST_SOURCE]",
+            f"endpoint={path.rsplit('/', 1)[-1]}",
+            "source=post_confirmation_latest_request",
+            flush=True,
+        )
         capture_status = live.eb_nba_capture_status()
         print("\n=== EB NBA 页面监听状态 ===")
         for endpoint, state in capture_status.items():
             short_name = endpoint.rsplit("/", 1)[-1]
             mark = "✓" if state["captured"] else ("已触发/未捕获" if state["seen"] else "未触发")
             print(f"[{mark}] {short_name} method={state['method'] or '-'}")
-        page_seen = any(state["seen"] for state in capture_status.values())
-        core_ready = all(
-            capture_status[endpoint]["captured"]
-            for endpoint in live.EB_NBA_CORE_ENDPOINTS
-        )
-        print("页面状态：", "已进入 EB 赛事页面" if page_seen else "尚未检测到 EB 赛事接口")
-        print("检测状态：", "正常检测中" if core_ready else "未就绪（核心接口模板未全部捕获）")
-        template = live.CAPTURED_REQUESTS.get(("eb", path))
-        if template is None or not core_ready:
-            captured = sorted(
-                f"{family}:{captured_path}"
-                for family, captured_path in live.CAPTURED_REQUESTS
-                if family == "eb"
-            )
-            discovered = sorted({
-                item.get("path", "")
-                for item in live.ENDPOINTS.get("discovered_endpoints", [])
-                if item.get("family") == "eb" and item.get("path")
-            })
-            print("\n=== EB 请求捕获诊断（不含凭证或请求体） ===")
-            print("live 模块路径:", live.__file__)
-            print("已捕获 EB 请求:", captured or "无")
-            print("已发现 EB 请求路径:", discovered or "无")
-            missing_core = [
-                endpoint for endpoint in live.EB_NBA_CORE_ENDPOINTS
-                if not capture_status[endpoint]["captured"]
-            ]
-            raise RuntimeError(
-                "EB NBA 页面监听尚未就绪；缺少核心接口模板："
-                + (", ".join(missing_core) if missing_core else path)
-                + "。请确认赛事列表加载完成，并检查 EB_CAPTURE_DEBUG。"
-            )
+        print("页面状态：已确认进入 EB NBA 列表页")
+        print("检测状态：已捕获本轮最新列表请求")
         try:
             body = json.loads(template.get("post_data") or "{}")
         except Exception:
@@ -506,10 +538,14 @@ class BrowserSessionBridge:
             return found
         for page_no in range(1, max(1, int(max_pages)) + 1):
             body["cpn"] = page_no
-            response = live.request_json(
-                self.op7, origin + path, "POST",
-                live.headers_env("OP7_READONLY_HEADERS_JSON"),
-                body=body, timeout_ms=self.timeout * 1000, family="eb")
+            if page_no == 1:
+                response = selected_record["response"]
+            else:
+                response = live.request_json(
+                    self.op7, origin + path, template.get("method", "POST"),
+                    live.headers_env("OP7_READONLY_HEADERS_JSON"),
+                    params=None, body=body if template.get("method") == "POST" else None,
+                    timeout_ms=self.timeout * 1000, family="eb")
             data = live.data_of(response)
             response_schema_samples.append({
                 "data_type": type(data).__name__,
