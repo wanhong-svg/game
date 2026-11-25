@@ -250,6 +250,7 @@ class BrowserSessionBridge:
         self._odds_responses = {}
         self._init_responses = []
         self._manual_bet_runtime_requests = []
+        self._manual_runtime_initialized = False
         self._odds_request_template = None
         self._list_responses = {}
         self._request_templates_by_id = {}
@@ -833,7 +834,7 @@ class BrowserSessionBridge:
     
             wait_seconds = 30.0
             _console_prompt(
-                "【页面操作 2】请现在在 OP7 浏览器刷新当前 NBA 列表页。"
+                "【页面操作 2｜刷新并捕获请求】列表页已在上一步确认打开。现在只需刷新当前 NBA 列表页；"
                 "刷新完成后回到终端按 Enter，脚本才开始等待并捕获本次列表请求。"
             )
             _console_stage(
@@ -1074,23 +1075,24 @@ class BrowserSessionBridge:
             raise RuntimeError(
                 "未捕获 getMatchOddsInfoPB 真实请求；未使用固定 cuid，停止盘口发现"
             )
-        # Capture runtime-only bet identifiers from a user-confirmed test action.
-        # The browser request is observed, not intercepted or modified.
-        self._manual_bet_runtime_requests.clear()
-        _console_prompt(
-            "【页面操作 4】参数采集需要一次页面操作：请在 OP7 浏览器选择一场 NBA 的全场大小盘口，"
-            "按你当前测试流程完成一次模拟投注提交。该页面请求会正常发送。"
-            "确认页面操作已完成后，回到终端按 Enter；脚本才会读取请求中的运行参数。"
-        )
-        for page in list(self.op7.pages):
-            try:
-                page.wait_for_timeout(500)
-            except Exception:
-                pass
-        if not self._manual_bet_runtime_requests:
-            raise RuntimeError(
-                "未捕获到人工投注接口请求；请确认页面已正常提交，并检查接口路径是否为 /yewu13/.../bet"
+        if not self._manual_runtime_initialized:
+            self._manual_bet_runtime_requests.clear()
+            _console_prompt(
+                "【页面操作 4｜仅首次初始化】请在 OP7 浏览器选择一场 NBA 全场大小盘口，"
+                "按当前测试流程完成一次模拟投注提交。页面请求会正常发送。"
+                "完成后回到终端按 Enter；脚本只采集运行参数，后续轮次不会再次要求投注确认。"
             )
+            for page in list(self.op7.pages):
+                try:
+                    page.wait_for_timeout(500)
+                except Exception:
+                    pass
+            if not self._manual_bet_runtime_requests:
+                raise RuntimeError("未捕获到初始化用的人工投注接口请求；请确认页面已正常提交")
+            self._manual_runtime_initialized = True
+            _console_stage("运行参数已完成首次初始化；后续轮次直接复用。")
+        else:
+            _console_stage("运行参数已初始化，跳过页面操作 4。")
 
         selections = []
         diagnostics = {
@@ -1220,6 +1222,19 @@ class BrowserSessionBridge:
                 reason = "找到了大小分选项，但缺少构建选项所需字段；请查看 missing_required_fields"
             raise RuntimeError("实时 NBA 全场大小分选项未能完整提取：" + reason)
         return selections
+
+    def confirm_and_wait_eb_retry(self, endpoint):
+        short_path = str(endpoint).rsplit("/", 1)[-1]
+        _console_prompt(
+            "【人工确认｜EB 数据未返回】接口 " + short_path +
+            " 未取得有效数据。请在 OP7 浏览器确认对应页面已加载，必要时刷新或重新打开赛事；"
+            "完成后回到终端按 Enter，脚本才会重新请求一次。"
+        )
+        for page in list(self.op7.pages):
+            try:
+                page.wait_for_timeout(500)
+            except Exception:
+                pass
 
     def post_json(self, base_url, path, body, headers, timeout=15):
         url = base_url.rstrip("/") + path
