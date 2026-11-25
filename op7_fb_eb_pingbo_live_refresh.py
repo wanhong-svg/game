@@ -83,13 +83,13 @@ def capture_request(request, family):
   resource_type=getattr(request,'resource_type','')
   if resource_type not in ('xhr','fetch'): return
   api_family=('pingbo' if family=='pingbo' else
-              'eb' if p.path.startswith('/yewu11/') else
+              'eb' if p.path.startswith(('/yewu11/','/yewu13/')) else
               'fb' if p.path.startswith('/v1/match/') else
               'common' if p.path.startswith('/api/') else 'op7_other')
   origin=f'{p.scheme}://{p.netloc}'
   # Discover all XHR/fetch routes, including paths not yet present in endpoints.json.
   persist_observed_endpoint(api_family,origin,p.netloc,p.path,resource_type,request.method)
-  known_paths={path for paths in ALLOW.values() for path in paths}
+  known_paths={path for api in ENDPOINTS.get('apis',{}).values() for path in (api.get('read_paths',[])+api.get('bet_paths',[]))}
   if p.path not in known_paths or request.method not in ('GET','POST'): return
   key=(api_family,p.path)
   headers={k:v for k,v in request.headers.items()
