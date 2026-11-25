@@ -820,10 +820,15 @@ def main():
                     if first_round:
                         _set_execution_stage("首次初始化：打开 OP7 与 Pingbo 浏览器窗口")
                         print("[执行节点] 首次启动：请等待 OP7 与 Pingbo 浏览器窗口打开。", flush=True)
-                        input(
-                            "【页面操作 1】请在 OP7 浏览器进入「篮球 / NBA 正规赛事」列表页面；"
-                            "确认列表已经显示后回到终端按 Enter。随后脚本会单独提示你刷新页面："
-                        )
+                        from op7_fb_eb_pingbo_live_refresh import USER_INPUT_WAITING
+                        USER_INPUT_WAITING.set()
+                        try:
+                            input(
+                                "【页面操作 1】请在 OP7 浏览器进入「篮球 / NBA 正规赛事」列表页面；"
+                                "确认列表已经显示后回到终端按 Enter。随后脚本会单独提示你刷新页面："
+                            )
+                        finally:
+                            USER_INPUT_WAITING.clear()
                         browser_session._nba_capture_confirmed = True
                         first_round = False
                         _set_execution_stage("已进入 NBA 列表页，等待刷新并捕获列表请求")
