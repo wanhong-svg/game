@@ -763,7 +763,7 @@ def main():
             while True:
                 try:
                     if first_round:
-                        input("首次运行：请在 OP7 浏览器打开 NBA 赛事列表，刷新一次后回到这里按 Enter；后续轮次会自动刷新赛事列表：")
+                        input("首次运行：请先在 OP7 浏览器打开 NBA 赛事列表并回车；随后请立即刷新一次列表完成请求捕获，后续轮次会自动刷新：")
                         browser_session._nba_capture_confirmed = True
                         first_round = False
                     # Suppress browser/schema diagnostics; only trading-state logs are shown.
