@@ -102,20 +102,25 @@ def capture_request(request, family):
               'fb' if p.path.startswith('/v1/match/') else
               'common' if p.path.startswith('/api/') else 'op7_other')
   origin=f'{p.scheme}://{p.netloc}'
-  # Discover all XHR/fetch routes, including paths not yet present in endpoints.json.
-  persist_observed_endpoint(api_family,origin,p.netloc,p.path,resource_type,request.method)
+  # Capture the in-memory template before writing discovery metadata. A config
+  # write failure must never discard a valid, allow-listed read request.
   known_paths={path for api in ENDPOINTS.get('apis',{}).values() for path in (api.get('read_paths',[])+api.get('bet_paths',[]))}
-  if p.path not in known_paths or request.method not in ('GET','POST'): return
-  key=(api_family,p.path)
-  headers={k:v for k,v in request.headers.items()
-   if k.lower() not in {'cookie','host','content-length','connection','accept-encoding','transfer-encoding'}
-   and not k.lower().startswith('sec-')}
-  CAPTURED_REQUESTS[key]={'method':request.method,'url':request.url,'headers':headers,'post_data':request.post_data}
-  if api_family in ('fb','eb','pingbo','common'):
-   origin_key='eb_bet' if api_family=='eb' and p.path.startswith('/yewu13/') else api_family
-   CAPTURED_ORIGINS[origin_key]=origin
-   api=ENDPOINTS.get('apis',{}).get(api_family,{})
-   ALLOW[p.netloc]=set(api.get('read_paths',[]))
+  if p.path in known_paths and request.method in ('GET','POST'):
+   key=(api_family,p.path)
+   headers={k:v for k,v in request.headers.items()
+    if k.lower() not in {'cookie','host','content-length','connection','accept-encoding','transfer-encoding'}
+    and not k.lower().startswith('sec-')}
+   CAPTURED_REQUESTS[key]={'method':request.method,'url':request.url,'headers':headers,'post_data':request.post_data}
+   if api_family in ('fb','eb','pingbo','common'):
+    origin_key='eb_bet' if api_family=='eb' and p.path.startswith('/yewu13/') else api_family
+    CAPTURED_ORIGINS[origin_key]=origin
+    api=ENDPOINTS.get('apis',{}).get(api_family,{})
+    ALLOW[p.netloc]=set(api.get('read_paths',[]))
+  # Discovery persistence is best-effort and never blocks the live capture.
+  try:
+   persist_observed_endpoint(api_family,origin,p.netloc,p.path,resource_type,request.method)
+  except Exception as persist_exc:
+   print(f'浏览器请求已捕获，但端点元数据写入失败：{type(persist_exc).__name__}: {persist_exc}',file=sys.stderr)
  except Exception as exc:
   print(f'浏览器请求捕获/配置更新失败：{type(exc).__name__}: {exc}',file=sys.stderr)
 
