@@ -359,6 +359,14 @@ class BrowserSessionBridge:
         """Fetch current EB event pages and return only explicitly identified NBA events."""
         path = "/yewu11/v1/m/matchesPagePB"
         input("请在已打开的 OP7 浏览器中手动进入「篮球 / NBA 正规赛事」列表，等待赛事加载完成后回到终端按 Enter：")
+        # The synchronous input() blocks Playwright's event loop. Requests made
+        # while the user is navigating may therefore still be queued when Enter
+        # is pressed. Pump every OP7 page briefly before taking the capture snapshot.
+        for page in list(self.op7.pages):
+            try:
+                page.wait_for_timeout(2000)
+            except Exception:
+                pass
         capture_status = live.eb_nba_capture_status()
         print("\n=== EB NBA 页面监听状态 ===")
         for endpoint, state in capture_status.items():
