@@ -211,6 +211,7 @@ class BrowserSessionBridge:
         self._request_templates_by_signature = {}
         self._nba_capture_started = 0.0
         self._attached_pages = {"op7": set(), "pingbo": set()}
+        self._ignored_event_ids = set()
 
     @staticmethod
     def _prompt_site_url(label):
@@ -743,6 +744,10 @@ class BrowserSessionBridge:
                           f"storage_read_error={type(exc).__name__}", flush=True)
         return _resolve_runtime_fields(sources, event_id, market=market, group=group)
 
+    def set_ignored_event_ids(self, event_ids):
+        """Exclude events whose confirmed successful-bet count reached the configured cap."""
+        self._ignored_event_ids = {str(value) for value in (event_ids or set()) if str(value).strip()}
+
     def discover_nba_events(self, max_pages=20):
         """Fetch current EB event pages and return only explicitly identified NBA events."""
         target_paths = (
@@ -946,7 +951,19 @@ class BrowserSessionBridge:
                     "mid_required": True,
                 },
             }, ensure_ascii=False, indent=2))
-        return list(rows_by_id.values())
+        eligible_rows = [
+            event for event_id, event in rows_by_id.items()
+            if event_id not in self._ignored_event_ids
+        ]
+        if self._ignored_event_ids:
+            print(
+                "[EVENT_LIMIT_FILTER]",
+                f"listed_nba_events={len(rows_by_id)}",
+                f"ignored={len(rows_by_id) - len(eligible_rows)}",
+                f"remaining={len(eligible_rows)}",
+                flush=True,
+            )
+        return eligible_rows
 
     def discover_nba_total_selections(self):
         """Discover NBA events and report safe schema diagnostics if totals cannot be resolved."""
