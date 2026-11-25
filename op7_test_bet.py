@@ -648,9 +648,12 @@ def auto_run_once(browser_session, stake, timeout, output_path, candidates=None)
     }
     browser_session.set_ignored_event_ids(ignored_event_ids)
     if candidates is None:
+        print("[执行节点] 正在重新读取当日 NBA 赛事列表及全场大小盘口。", flush=True)
         candidates = browser_session.discover_nba_total_selections()
     if not candidates:
+        print("[执行节点] 当前轮没有可检测的 NBA 全场大小盘口。", flush=True)
         return []
+    print("[执行节点]", f"本轮发现 {len(candidates)} 个盘口选项，开始按赛事逐个校验。", flush=True)
 
     events = {}
     for candidate in candidates:
@@ -671,13 +674,18 @@ def auto_run_once(browser_session, stake, timeout, output_path, candidates=None)
             )
             groups.setdefault(group_key, candidate)
 
-        for group_key, probe in groups.items():
+        for group_index, (group_key, probe) in enumerate(groups.items(), 1):
             if _successful_bet_counts().get(event_id, 0) >= MAX_SUCCESSFUL_BETS_PER_EVENT:
                 browser_session.set_ignored_event_ids(set(ignored_event_ids) | {event_id})
                 break
             line = group_key[2]
             event = probe["event"]
             matchup = f"{event.get('mhn')} vs {event.get('man')}"
+            print(
+                "[执行节点]",
+                f"当前赛事盘口 {group_index}/{len(groups)}：{matchup}，全场大小={line}；准备进行首次赔率校验。",
+                flush=True,
+            )
             print("[盘口校验中]", f"赛事={matchup}", f"event_id={event_id}", f"全场大小={line}", flush=True)
             try:
                 first_cross = refresh_and_validate_cross_odds(
@@ -692,6 +700,7 @@ def auto_run_once(browser_session, stake, timeout, output_path, candidates=None)
                 ), None)
                 if first_candidate is None:
                     continue
+                print("[执行节点]", "首次规则校验通过，等待 5 秒后进行第二次赔率校验。", flush=True)
                 time.sleep(5)
                 second_cross = refresh_and_validate_cross_odds(
                     lambda p=first_candidate: browser_session.refresh_cross_odds(p), max_seconds=5.0
@@ -706,8 +715,10 @@ def auto_run_once(browser_session, stake, timeout, output_path, candidates=None)
                 if candidate is None:
                     continue
                 print("[盘口匹配成功]", f"赛事={matchup}", f"全场大小={line}", f"方向={second_side}", flush=True)
+                print("[执行节点]", "二次校验通过，正在读取最新投注限额并组装投注参数。", flush=True)
                 selection = _selection_with_runtime(candidate)
                 saved_path = _write_selection_file(selection, output_path)
+                print("[执行节点]", "投注参数已保存，正在提交本次模拟投注。", flush=True)
                 result = submit_test_bet(
                     selection, stake, timeout,
                     cross_odds_refresh=lambda s=selection: browser_session.refresh_cross_odds(s),
@@ -763,12 +774,18 @@ def main():
             while True:
                 try:
                     if first_round:
-                        input("首次运行：请先在 OP7 浏览器打开 NBA 赛事列表并回车；随后请立即刷新一次列表完成请求捕获，后续轮次会自动刷新：")
+                        print("[执行节点] 首次启动：请等待 OP7 与 Pingbo 浏览器窗口打开。", flush=True)
+                        input(
+                            "【页面操作 1】请在 OP7 浏览器进入「篮球 / NBA 正规赛事」列表页面；"
+                            "确认列表已经显示后回到终端按 Enter。随后脚本会单独提示你刷新页面："
+                        )
                         browser_session._nba_capture_confirmed = True
                         first_round = False
-                    # Suppress browser/schema diagnostics; only trading-state logs are shown.
+                    print("[执行节点]", "开始获取当日 NBA 完整赛事列表（本轮重新获取，不复用上一轮列表）。", flush=True)
+                    # Suppress diagnostics only; bridge prompts/stages use sys.__stdout__.
                     with contextlib.redirect_stdout(io.StringIO()):
                         candidates = browser_session.discover_nba_total_selections()
+                    print("[执行节点]", f"本轮盘口发现完成，候选盘口数={len(candidates)}。", flush=True)
                     if candidates:
                         auto_run_once(
                             browser_session, args.stake, args.timeout,
@@ -780,6 +797,7 @@ def main():
                 except Exception as exc:
                     print("[错误]", f"{type(exc).__name__}: {str(exc)[:400]}", flush=True)
                 # Wait only after the entire currently discovered NBA slate is processed.
+                print("[执行节点]", "本轮所有 NBA 赛事处理完毕，暂停 120 秒；随后重新获取当日赛事列表。", flush=True)
                 time.sleep(120)
         return
     if args.discover_nba:
