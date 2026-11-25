@@ -7,6 +7,7 @@ never writes cookies, authorization headers, request bodies, or device identifie
 to the endpoint configuration file.
 """
 import json
+import sys
 import time
 from decimal import Decimal
 from pathlib import Path
@@ -192,6 +193,48 @@ def _resolve_runtime_fields(sources, event_id, market=None, group=None):
         resolved["_market_id"] = str(group.get("hid") or "")
     return resolved
 
+def _console_prompt(message):
+    """Show required browser-operation prompts even while diagnostic stdout is suppressed."""
+    sys.__stdout__.write("\\n" + str(message).strip() + "\\n")
+    sys.__stdout__.flush()
+    return input()
+
+
+def _console_stage(message):
+    sys.__stdout__.write("[执行节点] " + str(message).strip() + "\\n")
+    sys.__stdout__.flush()
+
+
+_PAGE_AUTO_SCROLL_SCRIPT = r"""
+(() => {
+  if (window.__op7AlternatingScrollTimer) return;
+  // First movement is upward after one minute, then alternate down/up.
+  window.__op7AlternatingScrollDirection = -1;
+  window.__op7AlternatingScrollTimer = window.setInterval(() => {
+    try {
+      const candidates = [document.scrollingElement, ...document.querySelectorAll("*")];
+      let target = document.scrollingElement || document.documentElement;
+      let bestScrollable = 0;
+      for (const el of candidates) {
+        if (!el || !el.getBoundingClientRect) continue;
+        const range = el.scrollHeight - el.clientHeight;
+        if (range > bestScrollable && el.clientHeight > 0) {
+          const style = window.getComputedStyle(el);
+          if (el === document.scrollingElement || /(auto|scroll)/.test(style.overflowY)) {
+            bestScrollable = range;
+            target = el;
+          }
+        }
+      }
+      const amount = Math.max(300, Math.floor((target.clientHeight || window.innerHeight) * 0.7));
+      target.scrollBy({top: window.__op7AlternatingScrollDirection * amount, behavior: "smooth"});
+      window.__op7AlternatingScrollDirection *= -1;
+    } catch (_) {}
+  }, 60000);
+})();
+"""
+
+
 class BrowserSessionBridge:
     """Own both persistent browser contexts for one CLI execution."""
 
@@ -278,6 +321,12 @@ class BrowserSessionBridge:
         if page in attached:
             return
         attached.add(page)
+        try:
+            # Install in the current document and every subsequent navigation.
+            page.add_init_script(_PAGE_AUTO_SCROLL_SCRIPT)
+            page.evaluate(_PAGE_AUTO_SCROLL_SCRIPT)
+        except Exception as exc:
+            _console_stage(f"{family} 页面自动滚动未能启用：{type(exc).__name__}")
         if family == "op7":
             page.on("request", self._capture_op7_request)
             page.on("response", self._capture_op7_response)
@@ -759,9 +808,9 @@ class BrowserSessionBridge:
         )
         if not getattr(self, "_nba_list_template", None):
             if not self._nba_capture_confirmed:
-                input(
-                    "请先在 OP7 浏览器进入「篮球 / NBA 正规赛事」列表；"
-                    "确认页面已打开后回到终端按 Enter，脚本随后开始捕获最新列表请求："
+                _console_prompt(
+                    "【页面操作 1】请在 OP7 浏览器进入「篮球 / NBA 正规赛事」列表。"
+                    "确认列表页面已打开后，回到终端按 Enter；脚本收到确认后才开始捕获列表请求。"
                 )
             self._nba_capture_confirmed = False
     
@@ -779,10 +828,12 @@ class BrowserSessionBridge:
                 live.CAPTURED_REQUESTS.pop(("eb", endpoint), None)
     
             wait_seconds = 30.0
-            print(
-                "请现在刷新一次当前 NBA 列表页；"
-                f"脚本将持续等待并捕获 matchesPagePB 或 noLiveMatchesPagePB 的请求（至少 {int(wait_seconds)} 秒）...",
-                flush=True,
+            _console_prompt(
+                "【页面操作 2】请现在在 OP7 浏览器刷新当前 NBA 列表页。"
+                "刷新完成后回到终端按 Enter，脚本才开始等待并捕获本次列表请求。"
+            )
+            _console_stage(
+                f"正在监听 NBA 列表请求，最长等待 {int(wait_seconds)} 秒；请勿关闭浏览器页面。"
             )
             # Keep listening for the full window so late pagination/refresh requests
             # are included; the newest captured request is selected after the window.
@@ -809,11 +860,8 @@ class BrowserSessionBridge:
             )
             path = selected_path
             template = selected_record["request_template"]
-            print(
-                "[EB_NBA_LIST_SOURCE]",
-                f"endpoint={path.rsplit('/', 1)[-1]}",
-                "source=post_confirmation_latest_request",
-                flush=True,
+            _console_stage(
+                f"已捕获 NBA 列表请求：{path.rsplit('/', 1)[-1]}；正在读取当日赛事分页。"
             )
             capture_status = live.eb_nba_capture_status()
             print("\n=== EB NBA 页面监听状态 ===")
@@ -1009,9 +1057,9 @@ class BrowserSessionBridge:
         if not events:
             raise RuntimeError("当前列表没有筛选到 NBA 正规赛事，停止盘口请求")
         if not self._odds_request_template:
-            input(
-                "请在 OP7 浏览器打开一场 NBA 正规赛事详情，并等待盘口赔率加载完成；"
-                "确认盘口已显示后回到终端按 Enter，脚本将复用捕获到的真实 mcid/cuid 参数："
+            _console_prompt(
+                "【页面操作 3】请在 OP7 浏览器打开任意一场 NBA 正规赛事详情，并等待全场大小盘口赔率加载完成。"
+                "确认盘口已经显示后，回到终端按 Enter；脚本收到确认后才读取真实赔率请求参数。"
             )
             for page in list(self.op7.pages):
                 try:
@@ -1022,13 +1070,13 @@ class BrowserSessionBridge:
             raise RuntimeError(
                 "未捕获 getMatchOddsInfoPB 真实请求；未使用固定 cuid，停止盘口发现"
             )
-        # Ask for one manual OP7 confirmation on the same NBA event/market.
-        # The request is not intercepted: the browser sends it normally.
+        # Capture runtime-only bet identifiers from a user-confirmed test action.
+        # The browser request is observed, not intercepted or modified.
         self._manual_bet_runtime_requests.clear()
-        input(
-            "参数采集步骤：请在 OP7 浏览器中选择本轮目标 NBA 赛事及全场大小盘口，"
-            "按页面正常流程手动确认一次模拟投注；请求会正常发送。"
-            "完成后回到终端按 Enter，脚本读取该请求中的运行参数："
+        _console_prompt(
+            "【页面操作 4】参数采集需要一次页面操作：请在 OP7 浏览器选择一场 NBA 的全场大小盘口，"
+            "按你当前测试流程完成一次模拟投注提交。该页面请求会正常发送。"
+            "确认页面操作已完成后，回到终端按 Enter；脚本才会读取请求中的运行参数。"
         )
         for page in list(self.op7.pages):
             try:
@@ -1063,7 +1111,7 @@ class BrowserSessionBridge:
             if isinstance(value, dict) and not diagnostics[key]:
                 diagnostics[key] = sorted(str(name) for name in value.keys())[:80]
 
-        for event in events:
+        for event_index, event in enumerate(events, 1):
             add_field_names("event_field_names", event)
 
             # Print identifying information from the already-captured list row
@@ -1085,16 +1133,10 @@ class BrowserSessionBridge:
             if not event_name:
                 event_name = "赛事名称未在列表字段中提供"
 
-            print(
-                "[EB_NBA_EVENT]",
-                f"mid={event.get('mid') or '-'}",
-                f"league={league_name}",
-                f"event={event_name}",
-                f"home={home_name or '未提供'}",
-                f"away={away_name or '未提供'}",
-                flush=True,
+            _console_stage(
+                f"赛事详情读取 {event_index}/{len(events)}：{event_name}（{home_name or '?'} vs {away_name or '?'}），"
+                "正在获取赛事详情和全场大小盘口。"
             )
-
             detail = self.fetch_match_detail(event)
             diagnostics["details_fetched"] += 1
             odds = self.fetch_match_odds(event)
