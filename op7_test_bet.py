@@ -466,7 +466,7 @@ def _write_selection_file(selection, output_path):
     output_path.parent.mkdir(parents=True, exist_ok=True)
     temp_path = output_path.with_name(output_path.name + ".tmp")
     temp_path.write_text(
-        json.dumps(selection, ensure_ascii=False, indent=2) + "\\n",
+        json.dumps(selection, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
     temp_path.replace(output_path)
@@ -580,6 +580,12 @@ def main():
     if args.auto_run:
         if args.input or args.discover_nba or not args.submit_test:
             parser.error("--auto-run cannot be combined with --input/--discover-nba and requires --submit-test")
+        runtime = load_runtime_endpoints()
+        eb_config = runtime["apis"]["eb"]
+        validate_test_target(os.environ.get(
+            "OP7_TEST_BET_BASE_URL",
+            eb_config.get("bet_api_base_url") or eb_config["base_url"],
+        ))
         from op7_browser_session_bridge import BrowserSessionBridge
         with BrowserSessionBridge(profiles_dir=args.profiles_dir, timeout=args.timeout) as browser_session:
             result = auto_run_once(browser_session, args.stake, args.timeout, args.output or "./selections.json")
