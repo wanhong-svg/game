@@ -167,6 +167,11 @@ def _resolve_runtime_fields(sources, event_id, market=None, group=None):
             # Keep it absent rather than inventing a value; any bet payload
             # still requires an explicitly supplied local-session device_imei.
             continue
+        if not distinct and field == "match_type":
+            # Read-only NBA discovery reports market selections without building
+            # API requests. Keep match_type absent rather than guessing it;
+            # request/payload builders must still require an explicit live value.
+            continue
         if not distinct:
             raise RuntimeError(f"赛事 {event_id} 详情上下文缺少字段 {field}；拒绝使用默认值")
         if len(distinct) != 1:
