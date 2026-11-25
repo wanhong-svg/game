@@ -275,7 +275,11 @@ class BrowserSessionBridge:
     @staticmethod
     def _prompt_site_url(label):
         while True:
-            value = input(f"请输入 {label} 访问地址（http:// 或 https://）：").strip()
+            live.USER_INPUT_WAITING.set()
+            try:
+                value = input(f"请输入 {label} 访问地址（http:// 或 https://）：").strip()
+            finally:
+                live.USER_INPUT_WAITING.clear()
             parsed = urlsplit(value)
             if parsed.scheme in {"http", "https"} and parsed.hostname and not parsed.username and not parsed.password:
                 return value
@@ -359,7 +363,7 @@ class BrowserSessionBridge:
             try:
                 payload = json.loads(response.text())
             except Exception:
-                print("[pingBo_RESPONSE] invalid_json",
+                print("【pingBo】[RESPONSE] invalid_json",
                       f"path={parsed.path.rsplit('/', 1)[-1]}",
                       f"http={response.status}", flush=True)
                 return
@@ -373,23 +377,26 @@ class BrowserSessionBridge:
                 "payload": payload, "captured_at": time.time(),
                 "status": response.status, "event_count": len(events),
             }
-            print("[pingBo_RESPONSE]",
+            print("【pingBo】[RESPONSE]",
                   f"path={parsed.path.rsplit('/', 1)[-1]}",
                   f"http={response.status}",
                   f"league_count={len(leagues) if isinstance(leagues, list) else 0}",
                   f"raw_event_count={raw_count}",
                   f"nba_event_count={len(events)}", flush=True)
         except Exception as exc:
-            print("[pingBo_RESPONSE] decode_failed", f"error={type(exc).__name__}", flush=True)
+            print("【pingBo】[RESPONSE] decode_failed", f"error={type(exc).__name__}", flush=True)
 
     def __exit__(self, exc_type, exc, tb):
         try:
             if exc_type is not None:
                 print("\\n检测过程中发生异常。浏览器暂时保持打开，便于检查页面；回到终端按 Enter 后关闭浏览器。")
+                live.USER_INPUT_WAITING.set()
                 try:
                     input()
                 except (EOFError, KeyboardInterrupt):
                     pass
+                finally:
+                    live.USER_INPUT_WAITING.clear()
             if self.op7:
                 self.op7.close()
             if self.pingbo:
@@ -1332,7 +1339,7 @@ class BrowserSessionBridge:
         if not req or not record or not record.get("event_count"):
             raise RuntimeError("Pingbo odds-live 初始化失败：刷新后仍未捕获到包含 NBA 赛事的接口响应；停止本轮")
         self._pingbo_capture_confirmed = True
-        print("[pingBo_INIT] odds-live 浏览器请求与 NBA 响应已捕获",
+        print("【pingBo】[INIT] odds-live 浏览器请求与 NBA 响应已捕获",
               f"nba_event_count={record['event_count']}", flush=True)
 
     def refresh_cross_odds(self, selection):
@@ -1366,19 +1373,19 @@ class BrowserSessionBridge:
             "_": str(int(time.time() * 1000)),
             "withCredentials": pb_query.get("withCredentials", "true"),
         }
-        print("[EB] 正在刷新当前赛事盘口赔率。", flush=True)
+        print("【EB】 正在刷新当前赛事盘口赔率。", flush=True)
         eb = live.request_json(
             self.op7, eb_origin + eb_path, "GET",
             live.headers_env("OP7_READONLY_HEADERS_JSON"),
             params=eb_params, timeout_ms=self.timeout * 1000, family="eb")
-        print("[pingBo] 正在请求 mobile odds-live 并解析 NBA 赛事数据。", flush=True)
+        print("【pingBo】 正在请求 mobile odds-live 并解析 NBA 赛事数据。", flush=True)
         pb = live.request_json(
             self.pingbo, pb_origin + pb_path, "GET",
             live.headers_env("PINGBO_READONLY_HEADERS_JSON"),
             params=pb_params, timeout_ms=self.timeout * 1000, family="pingbo")
         pb = live.unwrap(pb)
         pb_events = mapper.extract_pingbo_events(pb)
-        print("[pingBo] odds-live 响应解析完成", f"nba_event_count={len(pb_events)}", flush=True)
+        print("【pingBo】 odds-live 响应解析完成", f"nba_event_count={len(pb_events)}", flush=True)
         if not pb_events:
             raise RuntimeError("Pingbo odds-live 响应中没有解析到 NBA 赛事；停止赛事映射")
         eb_totals = _find_eb_totals(eb, event["mid"], line)
