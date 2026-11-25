@@ -273,7 +273,8 @@ def extract_pingbo_events(payload):
                 event_id=first(event,'id','eventId')
                 if not event_id or not home or not away: continue
                 found.append({
-                    'venue':'PINGBO','event_id':str(event_id),'home':str(home),'away':str(away),\n                    'home_zh':str(home_zh) if home_zh else None,'away_zh':str(away_zh) if away_zh else None,
+                    'venue':'PINGBO','event_id':str(event_id),'home':str(home),'away':str(away),
+                    'home_zh':str(home_zh) if home_zh else None,'away_zh':str(away_zh) if away_zh else None,
                     'league':str(league_name),'league_code':league_code,
                     'sport':'Basketball','start_time_ms':first(event,'time','startTime','start_time'),
                     '_raw_event':event,'_raw_markets':event.get('periods',{})
