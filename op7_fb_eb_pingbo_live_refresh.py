@@ -56,6 +56,32 @@ class AuthenticationRequired(RuntimeError):
 CAPTURED_REQUESTS={}
 CAPTURED_ORIGINS={}
 
+# EB NBA page lifecycle diagnostics. Only endpoint paths and capture state are logged.
+EB_NBA_PAGE_ENDPOINTS=(
+ '/yewu11/pub/v1/m/menu/initPB',
+ '/yewu11/v1/m/esportsMatchesPB',
+ '/yewu11/v1/m/getFilterMatchListPB',
+ '/yewu11/v1/m/getMatchBaseInfoByMidsPB',
+ '/yewu11/v1/m/matchesPagePB',
+ '/yewu11/v1/m/noLiveMatchesPagePB',
+)
+EB_NBA_CORE_ENDPOINTS=(
+ '/yewu11/v1/m/esportsMatchesPB',
+ '/yewu11/v1/m/matchesPagePB',
+)
+EB_NBA_CAPTURE_STATE={
+ path:{'seen':False,'captured':False,'method':None}
+ for path in EB_NBA_PAGE_ENDPOINTS
+}
+
+def eb_nba_capture_status():
+ """Return a credential-free snapshot of the six EB NBA page listeners."""
+ return {
+  path:dict(EB_NBA_CAPTURE_STATE[path])
+  for path in EB_NBA_PAGE_ENDPOINTS
+ }
+
+
 def persist_observed_endpoint(api_family, origin, host, path, resource_type=None, method=None):
  """Persist API discovery metadata only; never persist request bodies, headers or credentials."""
  config_path=Path(__file__).with_name('endpoints.json')
@@ -104,18 +130,39 @@ def capture_request(request, family):
   origin=f'{p.scheme}://{p.netloc}'
   # Capture the in-memory template before writing discovery metadata. A config
   # write failure must never discard a valid, allow-listed read request.
+  eb_api=ENDPOINTS.get('apis',{}).get('eb',{})
+  eb_allowed=set(eb_api.get('read_paths',[])+eb_api.get('bet_paths',[]))
   known_paths={path for api in ENDPOINTS.get('apis',{}).values() for path in (api.get('read_paths',[])+api.get('bet_paths',[]))}
-  if p.path in known_paths and request.method in ('GET','POST'):
+  allowed=(p.path in eb_allowed) if api_family=='eb' else (p.path in known_paths)
+  captured=False
+  if allowed and request.method in ('GET','POST'):
    key=(api_family,p.path)
    headers={k:v for k,v in request.headers.items()
     if k.lower() not in {'cookie','host','content-length','connection','accept-encoding','transfer-encoding'}
     and not k.lower().startswith('sec-')}
    CAPTURED_REQUESTS[key]={'method':request.method,'url':request.url,'headers':headers,'post_data':request.post_data}
+   captured=True
    if api_family in ('fb','eb','pingbo','common'):
     origin_key='eb_bet' if api_family=='eb' and p.path.startswith('/yewu13/') else api_family
     CAPTURED_ORIGINS[origin_key]=origin
     api=ENDPOINTS.get('apis',{}).get(api_family,{})
     ALLOW[p.netloc]=set(api.get('read_paths',[]))
+  if api_family=='eb' and p.path in EB_NBA_PAGE_ENDPOINTS:
+   state=EB_NBA_CAPTURE_STATE[p.path]
+   state['seen']=True
+   state['captured']=captured
+   state['method']=request.method
+   print(
+    '[EB_CAPTURE_DEBUG]',
+    f'family={family}',
+    f'api_family={api_family}',
+    f'method={request.method}',
+    f'path={p.path}',
+    f'allowed={allowed}',
+    f'captured={captured}',
+    f'resource_type={resource_type}',
+    flush=True,
+   )
   # Discovery persistence is best-effort and never blocks the live capture.
   try:
    persist_observed_endpoint(api_family,origin,p.netloc,p.path,resource_type,request.method)
