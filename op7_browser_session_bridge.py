@@ -108,7 +108,7 @@ def _decode_api_response(raw):
     import base64
     import gzip
     import binascii
-    encoded = envelope["data"].strip()
+    encoded = "".join(envelope["data"].split())
     try:
         packed = base64.b64decode(encoded, validate=True)
         try:
