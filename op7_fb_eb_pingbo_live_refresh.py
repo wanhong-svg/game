@@ -6,7 +6,7 @@ Only allow-listed public event-list / event-detail / odds-read endpoints are cal
 No bet, order, wallet, deposit, withdrawal, cashout, or account mutation endpoints.
 Uses normal Playwright persistent browser profiles; no CAPTCHA/MFA bypass.
 """
-import argparse, base64, gzip, json, os, sys, time, urllib.parse
+import argparse, base64, gzip, json, os, sys, time, threading, urllib.parse
 from datetime import datetime, timezone
 from pathlib import Path
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
@@ -79,6 +79,7 @@ class AuthenticationRequired(RuntimeError):
 # Cookies stay in Playwright's browser-context cookie jar; no credential is written to disk.
 CAPTURED_REQUESTS={}
 CAPTURED_ORIGINS={}
+USER_INPUT_WAITING=threading.Event()
 
 # EB NBA page lifecycle diagnostics. Only endpoint paths and capture state are logged.
 EB_NBA_PAGE_ENDPOINTS=(
@@ -171,6 +172,8 @@ def capture_request(request, family):
     CAPTURED_ORIGINS[origin_key]=origin
     api=ENDPOINTS.get('apis',{}).get(api_family,{})
     ALLOW[p.netloc]=set(api.get('read_paths',[]))
+  if api_family=='pingbo':
+   print('[pingBo_CAPTURE]',f'method={request.method}',f'path={p.path}',f'resource_type={resource_type}',f'allowed={allowed}',f'captured={captured}',flush=True)
   if api_family=='eb' and p.path in EB_NBA_PAGE_ENDPOINTS:
    state=EB_NBA_CAPTURE_STATE[p.path]
    state['seen']=True
