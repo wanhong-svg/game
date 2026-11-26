@@ -740,7 +740,12 @@ def auto_run_once(browser_session, stake, timeout, output_path, candidates=None)
                 break
             line = group_key[2]
             event = probe["event"]
-            matchup = f"{event.get('mhn')} vs {event.get('man')}"
+            eb_home = str(event.get("mhn") or event.get("home") or "").strip()
+            eb_away = str(event.get("man") or event.get("away") or "").strip()
+            if not eb_away and " vs " in eb_home.lower():
+                matchup = eb_home
+            else:
+                matchup = f"{eb_home} vs {eb_away}"
             print(
                 "[执行节点]",
                 f"当前赛事盘口 {group_index}/{len(groups)}：{matchup}，全场大小={line}，"
