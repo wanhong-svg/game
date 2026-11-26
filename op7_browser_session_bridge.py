@@ -418,6 +418,7 @@ class BrowserSessionBridge:
         self._attached_pages = {"op7": set(), "pingbo": set()}
         self._ignored_event_ids = set()
         self._pingbo_feed_responses = {}
+        self._pingbo_request_templates = {}
         self._pingbo_capture_confirmed = False
         self._pingbo_market_payload = None
         self._pingbo_last_refresh_monotonic = 0.0
@@ -566,8 +567,30 @@ class BrowserSessionBridge:
                         request_params.update({str(k): str(v) for k, v in body_params.items()})
                 except Exception:
                     pass
-            if request_params.get("sportId") != "4" or request_params.get("leagueIds") != "487":
+            required_params = {
+                "sportId": "4",
+                "leagueIds": "487",
+                "periodNumber": "0",
+                "periodNumbers": "-1",
+                "version": "0",
+            }
+            if any(request_params.get(key) != value for key, value in required_params.items()):
                 return
+
+            # Keep the latest exact browser request shape per endpoint in memory.
+            # Timestamp-like values are regenerated on refresh; all other observed
+            # dynamic values are retained without writing them to logs or disk.
+            timestamp_keys = {"_", "ts", "timestamp", "timestampms", "t"}
+            stable_params = {
+                key: value for key, value in request_params.items()
+                if str(key).lower() not in timestamp_keys
+            }
+            self._pingbo_request_templates[parsed.path] = {
+                "method": request.method,
+                "url": request.url,
+                "params": stable_params,
+                "captured_at": time.monotonic(),
+            }
             try:
                 payload = json.loads(response.text())
             except Exception:
@@ -1647,56 +1670,66 @@ class BrowserSessionBridge:
             raise RuntimeError(f"{path} returned non-JSON response") from None
 
     def ensure_pingbo_live_capture(self):
-        """Reuse a successful initialization; prompt only until the first valid feed arrives."""
-        paths = ("/sports-service/sv/mobile/odds-live",
-                 "/sports-service/sv/mobile/odds-today")
+        """Require both authenticated NBA feed endpoints and their usable responses."""
+        paths = ("/sports-service/sv/mobile/odds-today",
+                 "/sports-service/sv/mobile/odds-live")
+        required_params = {
+            "sportId": "4", "leagueIds": "487",
+            "periodNumber": "0", "periodNumbers": "-1", "version": "0",
+        }
+
         def valid_feed(path):
-            req = live.CAPTURED_REQUESTS.get(("pingbo", path))
             record = self._pingbo_feed_responses.get(path)
-            return bool(req and record and record.get("event_count", 0) > 0
-                        and req.get("url") and record.get("request_params", {}).get("sportId") == "4"
-                        and record.get("request_params", {}).get("leagueIds") == "487")
-        valid_paths = [path for path in paths if valid_feed(path)]
-        valid_path = max(
-            valid_paths,
-            key=lambda path: (
-                live.CAPTURED_REQUESTS.get(("pingbo", path), {}).get("captured_at_monotonic", 0),
-                self._pingbo_feed_responses.get(path, {}).get("captured_at", 0),
-            ),
-            default=None,
-        )
-        if valid_path:
-            self._pingbo_active_feed_path = valid_path
-            self._pingbo_capture_confirmed = True
-            self._pingbo_market_payload = self._pingbo_feed_responses[valid_path]["payload"]
-            return
-        if (self._pingbo_capture_confirmed and getattr(self, "_pingbo_active_feed_path", None)
-                and self._pingbo_market_payload is not None):
-            return
-        _console_prompt(
-            "【页面操作｜Pingbo 接口初始化】尚未取得有效的 Pingbo NBA 数据。"
-            "监控接口为 odds-live 或 odds-today，且请求 parameters 必须同时包含 sportId=4、leagueIds=487。"
-            "请在 Pingbo 浏览器进入篮球 NBA 赛事列表并手动刷新，等待赛事数据加载完成；"
-            "然后回到终端按 Enter。脚本会重新捕获符合条件的请求和响应，成功前不会继续赔率校验。"
-        )
-        deadline = time.monotonic() + 20.0
-        while time.monotonic() < deadline:
-            for page in list(self.pingbo.pages):
-                try:
-                    page.wait_for_timeout(250)
-                except Exception:
-                    pass
-            valid_path = next((candidate for candidate in paths if valid_feed(candidate)), None)
-            if valid_path:
-                break
-        if not valid_path:
-            raise RuntimeError("Pingbo NBA 初始化失败：刷新后仍未捕获到 parameters 同时包含 sportId=4、leagueIds=487 的 odds-live/odds-today 有效赛事响应；停止本轮")
+            template = self._pingbo_request_templates.get(path)
+            return bool(
+                record and template and record.get("event_count", 0) > 0
+                and all(record.get("request_params", {}).get(k) == v
+                        for k, v in required_params.items())
+                and all(template.get("params", {}).get(k) == v
+                        for k, v in required_params.items())
+            )
+
+        if not all(valid_feed(path) for path in paths):
+            _console_prompt(
+                "【页面操作｜Pingbo 双接口初始化】需要同时捕获 odds-today 与 odds-live。"
+                "两个请求都必须包含 sportId=4、leagueIds=487、periodNumber=0、"
+                "periodNumbers=-1、version=0。请在 Pingbo 浏览器进入篮球 NBA 赛事列表并刷新，"
+                "等待两个接口都返回数据后回到终端按 Enter。"
+            )
+            deadline = time.monotonic() + 30.0
+            while time.monotonic() < deadline:
+                for page in list(self.pingbo.pages):
+                    try:
+                        page.wait_for_timeout(250)
+                    except Exception:
+                        pass
+                if all(valid_feed(path) for path in paths):
+                    break
+
+        missing = [path.rsplit("/", 1)[-1] for path in paths if not valid_feed(path)]
+        if missing:
+            raise RuntimeError(
+                "Pingbo NBA 双接口初始化未完成：缺少有效请求/响应 "
+                + ", ".join(missing)
+                + "；请确认两个接口的五个筛选参数均匹配且响应中包含 NBA 赛事。"
+            )
+
         self._pingbo_capture_confirmed = True
-        self._pingbo_active_feed_path = valid_path
-        record = self._pingbo_feed_responses[valid_path]
-        print("【pingBo】[INIT] NBA 接口请求与响应已捕获",
-              f"endpoint={valid_path.rsplit('/', 1)[-1]}",
-              f"nba_event_count={record['event_count']}", flush=True)
+        # Prefer odds-live as the current feed, while retaining both response sets.
+        self._pingbo_active_feed_path = "/sports-service/sv/mobile/odds-live"
+        self._pingbo_market_payload = self._pingbo_feed_responses[
+            self._pingbo_active_feed_path
+        ]["payload"]
+        for path in paths:
+            record = self._pingbo_feed_responses[path]
+            params = self._pingbo_request_templates[path]["params"]
+            print(
+                "【pingBo】[INIT] NBA 双接口初始化成功",
+                f"endpoint={path.rsplit('/', 1)[-1]}",
+                f"nba_event_count={record['event_count']}",
+                f"dynamic_param_count={len(params)}",
+                flush=True,
+            )
 
     def refresh_cross_odds(self, selection):
         """Fetch both books in one synchronous window using the browser's logged-in sessions."""
@@ -1708,9 +1741,10 @@ class BrowserSessionBridge:
         pb_origin = live.CAPTURED_ORIGINS.get("pingbo", live.SITES["PINGBO_ORIGIN"])
         eb_path = "/yewu11/v1/m/matchDetail/getMatchOddsInfoPB"
         self.ensure_pingbo_live_capture()
-        pb_path = getattr(self, "_pingbo_active_feed_path", None)
-        if pb_path not in ("/sports-service/sv/mobile/odds-live", "/sports-service/sv/mobile/odds-today"):
-            raise RuntimeError("Pingbo NBA feed path missing after initialization")
+        pb_paths = (
+            "/sports-service/sv/mobile/odds-today",
+            "/sports-service/sv/mobile/odds-live",
+        )
         started = time.monotonic()
         cfg_path = Path(__file__).with_name("refresh_config.json")
         cfg = json.loads(cfg_path.read_text(encoding="utf-8")) if cfg_path.exists() else {}
@@ -1722,21 +1756,6 @@ class BrowserSessionBridge:
         )
         eb_params = dict((cfg.get("op7") or {}).get("odds_params") or {})
         eb_params["mid"] = str(event["mid"])
-        captured_pb = live.CAPTURED_REQUESTS.get(("pingbo", pb_path)) or {}
-        pb_query = dict(parse_qsl(urlsplit(captured_pb.get("url", "")).query, keep_blank_values=True))
-        pb_params = {
-            "sportId": pb_query.get("sportId", "4"),
-            "leagueIds": pb_query.get("leagueIds", "487"),
-            "periodNumber": pb_query.get("periodNumber", "0"),
-            "periodNumbers": pb_query.get("periodNumbers", "-1"),
-            "betTypes": pb_query.get("betTypes", "HDP,OU,ML_1X2"),
-            "resultingUnit": pb_query.get("resultingUnit", ""),
-            "locale": pb_query.get("locale", "zh_CN"),
-            "version": pb_query.get("version", "0"),
-            "specialName": pb_query.get("specialName", ""),
-            "_": str(int(time.time() * 1000)),
-            "withCredentials": pb_query.get("withCredentials", "true"),
-        }
         print("【EB】 正在刷新当前赛事盘口赔率。", flush=True)
         eb = live.request_json(
             self.op7, eb_origin + eb_path, "GET",
@@ -1748,34 +1767,96 @@ class BrowserSessionBridge:
             or now - self._pingbo_last_refresh_monotonic >= self._pingbo_refresh_interval_seconds
         )
         if refresh_pingbo:
-            # Use the latest browser-observed odds-today/odds-live request template
-            # at the shared EB/Pingbo refresh clock, then cache its NBA response.
-            latest_template = live.CAPTURED_REQUESTS.get(("pingbo", pb_path)) or captured_pb
-            latest_query = dict(parse_qsl(urlsplit(latest_template.get("url", "")).query, keep_blank_values=True))
-            for key in ("sportId", "leagueIds", "periodNumber", "periodNumbers",
-                        "betTypes", "resultingUnit", "locale", "version", "specialName",
-                        "withCredentials"):
-                if key in latest_query:
-                    pb_params[key] = latest_query[key]
-            print("【pingBo】[赔率刷新] 共享时钟到达，读取浏览器最近一次 NBA feed 请求。", flush=True)
-            pb = live.request_json(
-                self.pingbo, pb_origin + pb_path, "GET",
-                live.headers_env("PINGBO_READONLY_HEADERS_JSON"),
-                params=pb_params, timeout_ms=self.timeout * 1000, family="pingbo")
-            pb = live.unwrap(pb)
-            self._pingbo_market_payload = pb
+            # Rebuild both feeds independently from their latest browser-observed
+            # non-timestamp parameters. Only timestamp-like values are regenerated.
+            refreshed_payloads = {}
+            for pb_path in pb_paths:
+                template = self._pingbo_request_templates.get(pb_path)
+                if not template:
+                    raise RuntimeError(
+                        f"Pingbo {pb_path.rsplit('/', 1)[-1]} 请求模板丢失；需要重新初始化"
+                    )
+                pb_params = dict(template.get("params") or {})
+                pb_params["_"] = str(int(time.time() * 1000))
+                required = {
+                    "sportId": "4", "leagueIds": "487",
+                    "periodNumber": "0", "periodNumbers": "-1", "version": "0",
+                }
+                if any(str(pb_params.get(k)) != v for k, v in required.items()):
+                    raise RuntimeError(
+                        f"Pingbo {pb_path.rsplit('/', 1)[-1]} 动态参数校验失败；拒绝发送错误筛选请求"
+                    )
+                print(
+                    "【pingBo】[赔率刷新] 正在重建请求",
+                    f"endpoint={pb_path.rsplit('/', 1)[-1]}",
+                    f"保留动态参数数={len(pb_params) - 1}",
+                    flush=True,
+                )
+                response_payload = live.request_json(
+                    self.pingbo, pb_origin + pb_path, template.get("method", "GET"),
+                    live.headers_env("PINGBO_READONLY_HEADERS_JSON"),
+                    params=pb_params, timeout_ms=self.timeout * 1000, family="pingbo")
+                response_payload = live.unwrap(response_payload)
+                events_for_path = mapper.extract_pingbo_events(response_payload)
+                refreshed_payloads[pb_path] = response_payload
+                self._pingbo_feed_responses[pb_path] = {
+                    "request_params": dict(pb_params),
+                    "payload": response_payload,
+                    "captured_at": time.time(),
+                    "status": 200,
+                    "event_count": len(events_for_path),
+                }
+                print(
+                    "【pingBo】[赔率刷新] 接口响应解析完成",
+                    f"endpoint={pb_path.rsplit('/', 1)[-1]}",
+                    f"nba_event_count={len(events_for_path)}",
+                    flush=True,
+                )
+            self._pingbo_refreshed_payloads = refreshed_payloads
+            self._pingbo_market_payload = refreshed_payloads["/sports-service/sv/mobile/odds-live"]
             self._pingbo_last_refresh_monotonic = time.monotonic()
         else:
-            pb = self._pingbo_market_payload
-            print("【pingBo】[赔率缓存] 共享刷新周期内复用最近一次 NBA feed 响应。",
-                  f"剩余刷新秒数={max(0, self._pingbo_refresh_interval_seconds - (now - self._pingbo_last_refresh_monotonic)):.1f}",
-                  flush=True)
-        pb_events = mapper.extract_pingbo_events(pb)
-        print("【pingBo】 odds-live 响应解析完成", f"nba_event_count={len(pb_events)}", flush=True)
+            refreshed_payloads = getattr(self, "_pingbo_refreshed_payloads", {})
+            if not refreshed_payloads:
+                refreshed_payloads = {
+                    path: self._pingbo_feed_responses[path]["payload"]
+                    for path in pb_paths
+                }
+            print(
+                "【pingBo】[赔率缓存] 共享刷新周期内复用 odds-today 与 odds-live 最近响应。",
+                f"剩余刷新秒数={max(0, self._pingbo_refresh_interval_seconds - (now - self._pingbo_last_refresh_monotonic)):.1f}",
+                flush=True,
+            )
+        pb_events_by_id = {}
+        for path in pb_paths:
+            payload_for_path = refreshed_payloads.get(path)
+            path_events = mapper.extract_pingbo_events(payload_for_path)
+            for item in path_events:
+                pb_events_by_id[str(item.get("event_id") or item.get("id") or "")] = item
+        pb_events = list(pb_events_by_id.values())
+        print(
+            "【pingBo】双接口 NBA 赛事合并完成",
+            f"odds_today={len(mapper.extract_pingbo_events(refreshed_payloads.get(pb_paths[0]))) }",
+            f"odds_live={len(mapper.extract_pingbo_events(refreshed_payloads.get(pb_paths[1]))) }",
+            f"unique_nba_events={len(pb_events)}",
+            flush=True,
+        )
         if not pb_events:
-            raise RuntimeError("Pingbo odds-live 响应中没有解析到 NBA 赛事；停止赛事映射")
+            raise RuntimeError("Pingbo odds-today/odds-live 双接口响应均未解析到 NBA 赛事；停止赛事映射")
         eb_totals = _find_eb_totals(eb, event["mid"], line)
-        pb_event = _find_pingbo_event(pb, event)
+        pb_event = None
+        match_errors = []
+        for path in pb_paths:
+            payload_for_path = refreshed_payloads.get(path)
+            if payload_for_path is None:
+                continue
+            try:
+                pb_event = _find_pingbo_event(payload_for_path, event)
+                break
+            except RuntimeError as match_exc:
+                match_errors.append(f"{path.rsplit('/', 1)[-1]}: {str(match_exc)[:180]}")
+        if pb_event is None:
+            raise RuntimeError("Pingbo 双接口均未匹配到当前 EB 赛事；" + "；".join(match_errors))
         self._round_pingbo_matched_event_ids.add(str(event.get("mid") or event.get("event_id") or ""))
         pb_totals = _find_pingbo_totals(pb_event, line)
         elapsed = time.monotonic() - started
