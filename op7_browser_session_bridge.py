@@ -1682,7 +1682,7 @@ class BrowserSessionBridge:
             record = self._pingbo_feed_responses.get(path)
             template = self._pingbo_request_templates.get(path)
             return bool(
-                record and template and record.get("event_count", 0) > 0
+                record and template and record.get("status", 0) == 200
                 and all(record.get("request_params", {}).get(k) == v
                         for k, v in required_params.items())
                 and all(template.get("params", {}).get(k) == v
