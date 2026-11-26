@@ -1529,6 +1529,10 @@ class BrowserSessionBridge:
                         })
                         diagnostics["over_under_options"] += 1
                         add_field_names("option_field_names", option)
+                        if no_pingbo_matches:
+                            # For an unmatched round this is a reporting-only pass:
+                            # do not build runtime bet context or candidate selections.
+                            continue
                         required = {
                             "event.mid": event.get("mid"),
                             "event.tid": event.get("tid"),
