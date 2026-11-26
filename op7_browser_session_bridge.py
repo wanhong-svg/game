@@ -99,9 +99,15 @@ def _team_name_matches(eb_name, pingbo_names):
 
 def _kickoff_hour_key(value):
     stamp = mapper.timestamp_ms(value)
-    if stamp is None:
+    if stamp is not None:
+        return datetime.fromtimestamp(stamp / 1000, tz=timezone.utc).strftime("%Y%m%d%H")
+    try:
+        parsed = datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc).strftime("%Y%m%d%H")
+    except (TypeError, ValueError):
         return None
-    return datetime.fromtimestamp(stamp / 1000, tz=timezone.utc).strftime("%Y%m%d%H")
 
 
 def _clock_seconds(value):
