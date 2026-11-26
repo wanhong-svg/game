@@ -61,15 +61,15 @@ def _split_eb_teams(event):
     """Read separate EB team fields, or split a combined 'home vs away' label."""
     home = str(event.get("home") or event.get("mhn") or "").strip()
     away = str(event.get("away") or event.get("man") or "").strip()
-    combined = home if re.search(r"\\s+vs\\.?\\s+", home, re.I) else ""
+    combined = home if re.search(r"\s+vs\.?\s+", home, re.I) else ""
     if not combined:
         for key in ("mn", "matchName", "match_name", "eventName", "event_name"):
             value = str(event.get(key) or "").strip()
-            if re.search(r"\\s+vs\\.?\\s+", value, re.I):
+            if re.search(r"\s+vs\.?\s+", value, re.I):
                 combined = value
                 break
     if combined:
-        parts = re.split(r"\\s+vs\\.?\\s+", combined, maxsplit=1, flags=re.I)
+        parts = re.split(r"\s+vs\.?\s+", combined, maxsplit=1, flags=re.I)
         if len(parts) == 2:
             home, away = parts[0].strip(), parts[1].strip()
     return home, away
@@ -108,13 +108,13 @@ def _clock_seconds(value):
     text = str(value or "").strip()
     if not text:
         return None
-    match = re.fullmatch(r"(\\d{1,3}):(\\d{1,2})(?::(\\d{1,2}))?", text)
+    match = re.fullmatch(r"(\d{1,3}):(\d{1,2})(?::(\d{1,2}))?", text)
     if match:
         parts = [int(x) for x in match.groups() if x is not None]
         if len(parts) == 2:
             return parts[0] * 60 + parts[1]
         return parts[0] * 3600 + parts[1] * 60 + parts[2]
-    if re.fullmatch(r"\\d+(?:\\.\\d+)?", text):
+    if re.fullmatch(r"\d+(?:\.\d+)?", text):
         try:
             return int(float(text))
         except ValueError:
@@ -123,7 +123,7 @@ def _clock_seconds(value):
 
 
 def _score_pair(value):
-    match = re.fullmatch(r"\\s*(\\d+)\\s*[-:]\\s*(\\d+)\\s*", str(value or ""))
+    match = re.fullmatch(r"\s*(\d+)\s*[-:]\s*(\d+)\s*", str(value or ""))
     return (int(match.group(1)), int(match.group(2))) if match else None
 
 
@@ -1340,12 +1340,14 @@ class BrowserSessionBridge:
         feed_path = getattr(self, "_pingbo_active_feed_path", None)
         feed_record = self._pingbo_feed_responses.get(feed_path, {}) if feed_path else {}
         feed_payload = self._pingbo_market_payload or feed_record.get("payload")
+        self._round_pingbo_matched_event_ids = set()
         if feed_payload is not None:
             matched_events = []
             for event in events:
                 try:
                     _find_pingbo_event(feed_payload, event)
                     matched_events.append(event)
+                    self._round_pingbo_matched_event_ids.add(str(event.get("mid") or ""))
                 except RuntimeError:
                     continue
             if not matched_events:
@@ -1500,6 +1502,8 @@ class BrowserSessionBridge:
                             "option": option, "runtime_context": runtime_context,
                         })
         if not selections:
+            if not self._round_pingbo_matched_event_ids:
+                self._print_event_match_diagnostics(events)
             print("\\n=== EB NBA 大小分字段诊断（仅字段名和计数，不含请求凭证或原始响应） ===")
             print(json.dumps(diagnostics, ensure_ascii=False, indent=2))
             if not events:
@@ -1513,8 +1517,6 @@ class BrowserSessionBridge:
             else:
                 reason = "找到了大小分选项，但缺少构建选项所需字段；请查看 missing_required_fields"
             raise RuntimeError("实时 NBA 全场大小分选项未能完整提取：" + reason)
-        if not selections and not self._round_pingbo_matched_event_ids:
-            self._print_event_match_diagnostics(events)
         return selections
 
     def confirm_and_wait_eb_retry(self, endpoint):
