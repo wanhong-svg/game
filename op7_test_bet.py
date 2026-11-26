@@ -683,6 +683,28 @@ def auto_run_once(browser_session, stake, timeout, output_path, candidates=None)
         if count >= MAX_SUCCESSFUL_BETS_PER_EVENT
     }
     browser_session.set_ignored_event_ids(ignored_event_ids)
+    browser_session._round_pingbo_matched_event_ids = set()
+
+    def display_eb_odds(option):
+        raw = option.get("ov")
+        try:
+            value = Decimal(str(raw))
+            if value > Decimal("1000"):
+                value /= Decimal("100000")
+            return format(value, ".5f").rstrip("0").rstrip(".")
+        except Exception:
+            return str(raw if raw is not None else "?")
+
+    def log_cross_odds(stage, matchup, line, snapshot):
+        print(
+            "[赔率快照]",
+            f"阶段={stage}", f"赛事={matchup}", f"全场大小={line}",
+            f"EB大={snapshot.get('eb_over')}", f"EB小={snapshot.get('eb_under')}",
+            f"Pingbo大={snapshot.get('pingbo_over')}", f"Pingbo小={snapshot.get('pingbo_under')}",
+            f"方向={snapshot.get('direction') or '?'}",
+            flush=True,
+        )
+
     if candidates is None:
         print("[执行节点] 正在重新读取当日 NBA 赛事列表及全场大小盘口。", flush=True)
         candidates = browser_session.discover_nba_total_selections()
@@ -720,7 +742,8 @@ def auto_run_once(browser_session, stake, timeout, output_path, candidates=None)
             matchup = f"{event.get('mhn')} vs {event.get('man')}"
             print(
                 "[执行节点]",
-                f"当前赛事盘口 {group_index}/{len(groups)}：{matchup}，全场大小={line}；准备进行首次赔率校验。",
+                f"当前赛事盘口 {group_index}/{len(groups)}：{matchup}，全场大小={line}，"
+                f"EB当前选项赔率={display_eb_odds(probe['option'])}；准备进行首次赔率校验。",
                 flush=True,
             )
             _set_execution_stage("赔率首次校验：" + matchup + " 全场大小=" + str(line))
@@ -730,6 +753,7 @@ def auto_run_once(browser_session, stake, timeout, output_path, candidates=None)
                     lambda p=probe: browser_session.refresh_cross_odds(p), max_seconds=5.0
                 )
                 first_side = first_cross["direction"].lower()
+                log_cross_odds("首次校验", matchup, line, first_cross)
                 first_candidate = next((
                     item for item in event_candidates
                     if str(item["market"].get("hpid")) == group_key[0]
@@ -746,6 +770,7 @@ def auto_run_once(browser_session, stake, timeout, output_path, candidates=None)
                     lambda p=first_candidate: browser_session.refresh_cross_odds(p), max_seconds=5.0
                 )
                 second_side = second_cross["direction"].lower()
+                log_cross_odds("二次校验", matchup, line, second_cross)
                 candidate = next((
                     item for item in event_candidates
                     if str(item["market"].get("hpid")) == group_key[0]
@@ -786,6 +811,12 @@ def auto_run_once(browser_session, stake, timeout, output_path, candidates=None)
                 if "outcome is uncertain" in message or "duplicate candidate" in message:
                     raise
                 continue
+    if not browser_session._round_pingbo_matched_event_ids:
+        browser_session._print_event_match_diagnostics(
+            [rows[0]["event"] for rows in events.values() if rows]
+        )
+        print("[执行节点] 本轮 EB NBA 赛事全部未能与 Pingbo NBA 赛事匹配；已输出双方主客场球队清单。",
+              flush=True)
     return round_results
 
 
