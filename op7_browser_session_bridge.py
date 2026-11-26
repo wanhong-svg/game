@@ -1795,7 +1795,9 @@ class BrowserSessionBridge:
                 response_payload = live.request_json(
                     self.pingbo, pb_origin + pb_path, template.get("method", "GET"),
                     live.headers_env("PINGBO_READONLY_HEADERS_JSON"),
-                    params=pb_params, timeout_ms=self.timeout * 1000, family="pingbo")
+                    params=pb_params,
+                    body=pb_params if template.get("method") == "POST" else None,
+                    timeout_ms=self.timeout * 1000, family="pingbo")
                 response_payload = live.unwrap(response_payload)
                 events_for_path = mapper.extract_pingbo_events(response_payload)
                 refreshed_payloads[pb_path] = response_payload
@@ -1813,7 +1815,8 @@ class BrowserSessionBridge:
                     flush=True,
                 )
             self._pingbo_refreshed_payloads = refreshed_payloads
-            self._pingbo_market_payload = refreshed_payloads["/sports-service/sv/mobile/odds-live"]
+            self._pingbo_active_feed_path = "/sports-service/sv/mobile/odds-live"
+            self._pingbo_market_payload = refreshed_payloads[self._pingbo_active_feed_path]
             self._pingbo_last_refresh_monotonic = time.monotonic()
         else:
             refreshed_payloads = getattr(self, "_pingbo_refreshed_payloads", {})
