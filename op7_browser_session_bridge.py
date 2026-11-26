@@ -61,15 +61,15 @@ def _split_eb_teams(event):
     """Read separate EB team fields, or split a combined 'home vs away' label."""
     home = str(event.get("home") or event.get("mhn") or "").strip()
     away = str(event.get("away") or event.get("man") or "").strip()
-    combined = home if re.search(r"\s+vs\.?\s+", home, re.I) else ""
+    combined = home if re.search(r"\s*vs\.?\s*", home, re.I) else ""
     if not combined:
         for key in ("mn", "matchName", "match_name", "eventName", "event_name"):
             value = str(event.get(key) or "").strip()
-            if re.search(r"\s+vs\.?\s+", value, re.I):
+            if re.search(r"\s*vs\.?\s*", value, re.I):
                 combined = value
                 break
     if combined:
-        parts = re.split(r"\s+vs\.?\s+", combined, maxsplit=1, flags=re.I)
+        parts = re.split(r"\s*vs\.?\s*", combined, maxsplit=1, flags=re.I)
         if len(parts) == 2:
             home, away = parts[0].strip(), parts[1].strip()
     return home, away
@@ -583,6 +583,8 @@ class BrowserSessionBridge:
             }
             self._pingbo_market_payload = payload
             self._pingbo_last_refresh_monotonic = time.monotonic()
+            self._pingbo_active_feed_path = parsed.path
+            self._pingbo_capture_confirmed = True
             print("【pingBo】[RESPONSE]",
                   f"path={parsed.path.rsplit('/', 1)[-1]}",
                   f"http={response.status}",
@@ -1568,14 +1570,22 @@ class BrowserSessionBridge:
             return bool(req and record and record.get("event_count", 0) > 0
                         and req.get("url") and record.get("request_params", {}).get("sportId") == "4"
                         and record.get("request_params", {}).get("leagueIds") == "487")
-        if (self._pingbo_capture_confirmed and getattr(self, "_pingbo_active_feed_path", None)
-                and self._pingbo_market_payload is not None):
-            return
-        valid_path = next((path for path in paths if valid_feed(path)), None)
+        valid_paths = [path for path in paths if valid_feed(path)]
+        valid_path = max(
+            valid_paths,
+            key=lambda path: (
+                live.CAPTURED_REQUESTS.get(("pingbo", path), {}).get("captured_at_monotonic", 0),
+                self._pingbo_feed_responses.get(path, {}).get("captured_at", 0),
+            ),
+            default=None,
+        )
         if valid_path:
             self._pingbo_active_feed_path = valid_path
             self._pingbo_capture_confirmed = True
             self._pingbo_market_payload = self._pingbo_feed_responses[valid_path]["payload"]
+            return
+        if (self._pingbo_capture_confirmed and getattr(self, "_pingbo_active_feed_path", None)
+                and self._pingbo_market_payload is not None):
             return
         _console_prompt(
             "【页面操作｜Pingbo 接口初始化】尚未取得有效的 Pingbo NBA 数据。"
