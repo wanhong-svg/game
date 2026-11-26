@@ -130,8 +130,8 @@ def _score_pair(value):
 def _event_progress_signature(event, reverse_score=False):
     """Extract a complete period/clock/score signature without guessing missing fields."""
     aliases = {
-        "period": {"period","quarter","currentperiod","currentquarter","periodname","quartername","stage"},
-        "clock": {"clock","gameclock","matchclock","remainingtime","timeremaining","livetime","matchtimeleft"},
+        "period": {"period","periodnumber","periodid","currentperiod","currentperiodnumber","currentperiodid","quarter","currentquarter","periodname","quartername","stage","pe","mmp"},
+        "clock": {"clock","gameclock","matchclock","remainingtime","timeremaining","livetime","matchtimeleft","timeleft","remainingseconds","tms"},
         "home_score": {"homescore","hometeamscore","scorehome"},
         "away_score": {"awayscore","awayteamscore","scoreaway"},
         "score": {"score","currentscore","gamescore","scoreboard"},
@@ -157,8 +157,8 @@ def _event_progress_signature(event, reverse_score=False):
         if unique:
             result[key] = unique[0]
     if "score" not in result and {"home_score", "away_score"} <= result.keys():
-        score = (int(result["home_score"]), int(result["away_score"]))
-        if reverse_score:
+        score = _score_pair(str(result["home_score"]) + "-" + str(result["away_score"]))
+        if score and reverse_score:
             score = (score[1], score[0])
     else:
         score = _score_pair(result.get("score"))
