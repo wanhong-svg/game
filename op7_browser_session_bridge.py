@@ -136,7 +136,7 @@ def _score_pair(value):
 def _event_progress_signature(event, reverse_score=False):
     """Extract a complete period/clock/score signature without guessing missing fields."""
     aliases = {
-        "period": {"period","periodnumber","periodid","currentperiod","currentperiodnumber","currentperiodid","quarter","currentquarter","periodname","quartername","stage","pe","mmp"},
+        "period": {"period","periodnumber","periodid","currentperiod","currentperiodnumber","currentperiodid","quarter","currentquarter","periodname","quartername","stage"},
         "clock": {"clock","gameclock","matchclock","remainingtime","timeremaining","livetime","matchtimeleft","timeleft","remainingseconds","tms"},
         "home_score": {"homescore","hometeamscore","scorehome"},
         "away_score": {"awayscore","awayteamscore","scoreaway"},
