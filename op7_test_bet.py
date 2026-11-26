@@ -742,7 +742,7 @@ def auto_run_once(browser_session, stake, timeout, output_path, candidates=None)
             event = probe["event"]
             eb_home = str(event.get("mhn") or event.get("home") or "").strip()
             eb_away = str(event.get("man") or event.get("away") or "").strip()
-            if not eb_away and " vs " in eb_home.lower():
+            if not eb_away and "vs" in eb_home.lower():
                 matchup = eb_home
             else:
                 matchup = f"{eb_home} vs {eb_away}"
@@ -817,7 +817,7 @@ def auto_run_once(browser_session, stake, timeout, output_path, candidates=None)
                 if "outcome is uncertain" in message or "duplicate candidate" in message:
                     raise
                 continue
-    if not browser_session._round_pingbo_matched_event_ids:
+    if events and not browser_session._round_pingbo_matched_event_ids:
         browser_session._print_event_match_diagnostics(
             [rows[0]["event"] for rows in events.values() if rows]
         )
