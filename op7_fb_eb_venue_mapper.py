@@ -193,7 +193,7 @@ NBA_TEAM_ALIASES = {
     "DEN": {"canonical": "Denver Nuggets", "zh_cn": "丹佛掘金", "aliases": ["Denver Nuggets","Denver","Nuggets","DEN","丹佛掘金","掘金"]},
     "DET": {"canonical": "Detroit Pistons", "zh_cn": "底特律活塞", "aliases": ["Detroit Pistons","Detroit","Pistons","DET","底特律活塞","活塞"]},
     "GSW": {"canonical": "Golden State Warriors", "zh_cn": "金州勇士", "aliases": ["Golden State Warriors","Golden State","GS Warriors","Warriors","GSW","金州勇士","勇士"]},
-    "HOU": {"canonical": "Houston Rockets", "zh_cn": "休斯敦火箭", "aliases": ["Houston Rockets","Houston","Rockets","HOU","休斯敦火箭","火箭"]},
+    "HOU": {"canonical": "Houston Rockets", "zh_cn": "休斯敦火箭", "aliases": ["Houston Rockets","Houston","Rockets","HOU","休斯敦火箭","休斯顿火箭","休斯敦","休斯顿","火箭"]},
     "IND": {"canonical": "Indiana Pacers", "zh_cn": "印第安纳步行者", "aliases": ["Indiana Pacers","Indiana","Pacers","IND","印第安纳步行者","步行者"]},
     "LAC": {"canonical": "Los Angeles Clippers", "zh_cn": "洛杉矶快船", "aliases": ["Los Angeles Clippers","LA Clippers","L.A. Clippers","Clippers","LAC","洛杉矶快船","快船"]},
     "LAL": {"canonical": "Los Angeles Lakers", "zh_cn": "洛杉矶湖人", "aliases": ["Los Angeles Lakers","LA Lakers","L.A. Lakers","Lakers","LAL","洛杉矶湖人","湖人"]},
