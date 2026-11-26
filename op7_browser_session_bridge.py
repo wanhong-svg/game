@@ -12,6 +12,7 @@ import sys
 import threading
 import time
 from decimal import Decimal
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlsplit, parse_qsl, unquote
 
@@ -56,8 +57,78 @@ def _find_eb_totals(raw, event_id, line):
     return result
 
 
+def _split_eb_teams(event):
+    """Read separate EB team fields, or split a combined 'home vs away' label."""
+    home = str(event.get("home") or event.get("mhn") or "").strip()
+    away = str(event.get("away") or event.get("man") or "").strip()
+    combined = home if re.search(r"\\s+vs\\.?\\s+", home, re.I) else ""
+    if not combined:
+        for key in ("mn", "matchName", "match_name", "eventName", "event_name"):
+            value = str(event.get(key) or "").strip()
+            if re.search(r"\\s+vs\\.?\\s+", value, re.I):
+                combined = value
+                break
+    if combined:
+        parts = re.split(r"\\s+vs\\.?\\s+", combined, maxsplit=1, flags=re.I)
+        if len(parts) == 2:
+            home, away = parts[0].strip(), parts[1].strip()
+    return home, away
+
+
+def _team_name_matches(eb_name, pingbo_names):
+    """Match canonical NBA identities first, then conservative normalized containment."""
+    eb_name = str(eb_name or "").strip()
+    if not eb_name:
+        return False
+    eb_id = mapper.nba_team_id(eb_name)
+    for pb_name in pingbo_names:
+        pb_name = str(pb_name or "").strip()
+        if not pb_name:
+            continue
+        pb_id = mapper.nba_team_id(pb_name)
+        if eb_id and pb_id:
+            if eb_id == pb_id:
+                return True
+            continue
+        left = mapper.norm_team(eb_name)
+        right = mapper.norm_team(pb_name)
+        if left and right and (left in right or right in left):
+            return True
+    return False
+
+
+def _kickoff_hour_key(value):
+    stamp = mapper.timestamp_ms(value)
+    if stamp is None:
+        return None
+    return datetime.fromtimestamp(stamp / 1000, tz=timezone.utc).strftime("%Y%m%d%H")
+
+
+def _clock_seconds(value):
+    text = str(value or "").strip()
+    if not text:
+        return None
+    match = re.fullmatch(r"(\\d{1,3}):(\\d{1,2})(?::(\\d{1,2}))?", text)
+    if match:
+        parts = [int(x) for x in match.groups() if x is not None]
+        if len(parts) == 2:
+            return parts[0] * 60 + parts[1]
+        return parts[0] * 3600 + parts[1] * 60 + parts[2]
+    if re.fullmatch(r"\\d+(?:\\.\\d+)?", text):
+        try:
+            return int(float(text))
+        except ValueError:
+            return None
+    return None
+
+
+def _score_pair(value):
+    match = re.fullmatch(r"\\s*(\\d+)\\s*[-:]\\s*(\\d+)\\s*", str(value or ""))
+    return (int(match.group(1)), int(match.group(2))) if match else None
+
+
 def _event_progress_signature(event, reverse_score=False):
-    """Extract only explicit period, clock and score fields; never infer a live state."""
+    """Extract a complete period/clock/score signature without guessing missing fields."""
     aliases = {
         "period": {"period","quarter","currentperiod","currentquarter","periodname","quartername","stage"},
         "clock": {"clock","gameclock","matchclock","remainingtime","timeremaining","livetime","matchtimeleft"},
@@ -65,17 +136,18 @@ def _event_progress_signature(event, reverse_score=False):
         "away_score": {"awayscore","awayteamscore","scoreaway"},
         "score": {"score","currentscore","gamescore","scoreboard"},
     }
-    found = {k: [] for k in aliases}
+    found = {key: [] for key in aliases}
     def walk(node):
         if isinstance(node, dict):
             for key, value in node.items():
-                normalized = str(key).replace("_","").replace("-","").lower()
+                normalized = str(key).replace("_", "").replace("-", "").lower()
                 for name, keys in aliases.items():
-                    if normalized in keys and value not in (None,"") and not isinstance(value,(dict,list)):
+                    if normalized in keys and value not in (None, "") and not isinstance(value, (dict, list)):
                         found[name].append(str(value).strip())
                 walk(value)
         elif isinstance(node, list):
-            for value in node: walk(value)
+            for value in node:
+                walk(value)
     walk(event)
     result = {}
     for key, values in found.items():
@@ -84,63 +156,69 @@ def _event_progress_signature(event, reverse_score=False):
             return None
         if unique:
             result[key] = unique[0]
-    if "score" not in result and {"home_score","away_score"} <= result.keys():
-        home_score, away_score = result["home_score"], result["away_score"]
+    if "score" not in result and {"home_score", "away_score"} <= result.keys():
+        score = (int(result["home_score"]), int(result["away_score"]))
         if reverse_score:
-            home_score, away_score = away_score, home_score
-        result["score"] = home_score + "-" + away_score
-    elif reverse_score and "score" in result:
-        score_match = re.fullmatch(r"\\s*(\\d+)\\s*[-:]\\s*(\\d+)\\s*", result["score"])
-        if score_match:
-            result["score"] = score_match.group(2) + "-" + score_match.group(1)
-    if not {"period","clock","score"} <= result.keys():
+            score = (score[1], score[0])
+    else:
+        score = _score_pair(result.get("score"))
+        if score and reverse_score:
+            score = (score[1], score[0])
+    clock = _clock_seconds(result.get("clock"))
+    period = str(result.get("period") or "").strip().lower()
+    if not period or clock is None or score is None:
         return None
-    return (result["period"].lower(), result["clock"].lower(), result["score"].lower())
+    return {"period": period, "clock_seconds": clock, "score": score}
+
+
+def _progress_matches(left, right):
+    if not left or not right or left["period"] != right["period"]:
+        return False
+    if abs(left["clock_seconds"] - right["clock_seconds"]) > 60:
+        return False
+    return (
+        abs(left["score"][0] - right["score"][0]) <= 5
+        and abs(left["score"][1] - right["score"][1]) <= 5
+    )
 
 
 def _find_pingbo_event(payload, event):
-    eb_home_raw = str(event.get("home") or event.get("mhn") or "").strip()
-    eb_away_raw = str(event.get("away") or event.get("man") or "").strip()
-    eb_home_id, eb_away_id = mapper.nba_team_id(eb_home_raw), mapper.nba_team_id(eb_away_raw)
-    if not eb_home_id or not eb_away_id or eb_home_id == eb_away_id:
-        raise RuntimeError(f"EB 球队名称无法通过 NBA 官方别名字典识别：{eb_home_raw} vs {eb_away_raw}")
-    target_time = mapper.timestamp_ms(event.get("mgt") or event.get("start_time_ms"))
+    eb_home_raw, eb_away_raw = _split_eb_teams(event)
+    if not eb_home_raw or not eb_away_raw:
+        raise RuntimeError(f"EB 赛事球队名称无法按 vs 拆分：{eb_home_raw} vs {eb_away_raw}")
+    target_hour = _kickoff_hour_key(event.get("mgt") or event.get("start_time_ms"))
     eb_progress = _event_progress_signature(event)
     candidates = []
+    home_candidates = []
     for item in mapper.extract_pingbo_events(payload):
-        pb_home_raw, pb_away_raw = str(item.get("home") or "").strip(), str(item.get("away") or "").strip()
-        pb_home_id, pb_away_id = mapper.nba_team_id(pb_home_raw), mapper.nba_team_id(pb_away_raw)
-        if not pb_home_id or not pb_away_id or pb_home_id == pb_away_id:
+        pb_home_raw = str(item.get("home") or "").strip()
+        pb_away_raw = str(item.get("away") or "").strip()
+        pb_home_names = (pb_home_raw, item.get("home_zh"))
+        pb_away_names = (pb_away_raw, item.get("away_zh"))
+        # First locate the EB home team anywhere in the Pingbo fixture.
+        if _team_name_matches(eb_home_raw, pb_home_names):
+            opponent_names, reverse = pb_away_names, False
+        elif _team_name_matches(eb_home_raw, pb_away_names):
+            opponent_names, reverse = pb_home_names, True
+        else:
             continue
-        same = pb_home_id == eb_home_id and pb_away_id == eb_away_id
-        reverse = pb_home_id == eb_away_id and pb_away_id == eb_home_id
-        if not (same or reverse):
+        home_candidates.append(item)
+        # Only after the home team has identified a fixture, validate the away team.
+        if not _team_name_matches(eb_away_raw, opponent_names):
             continue
-        stamp = mapper.timestamp_ms(item.get("start_time_ms"))
-        # User rule: full-name/short-name cases require an exact temporal anchor.
-        # All cases use exact kickoff equality when both source timestamps exist;
-        # otherwise a complete live period+clock+score signature must match.
-        kickoff_match = target_time is not None and stamp is not None and target_time == stamp
+        stamp_hour = _kickoff_hour_key(item.get("start_time_ms"))
+        kickoff_match = target_hour is not None and stamp_hour is not None and target_hour == stamp_hour
         pb_progress = _event_progress_signature(item.get("_raw_event") or item, reverse_score=reverse)
-        progress_match = (
-            eb_progress is not None and pb_progress is not None
-            and eb_progress == pb_progress
-        )
-        # Either exact kickoff timestamp or a complete, identical live-state
-        # signature is sufficient; partial/missing progress never counts.
-        temporal_match = kickoff_match or progress_match
-        if not temporal_match:
-            continue
-        candidates.append(item)
+        progress_match = _progress_matches(eb_progress, pb_progress)
+        if kickoff_match or progress_match:
+            candidates.append(item)
     if len(candidates) != 1:
         raise RuntimeError(
             f"Pingbo event mapping failed: candidates={len(candidates)}; "
-            f"EB={eb_home_raw} vs {eb_away_raw}, "
-            f"team_ids={eb_home_id}/{eb_away_id}; "
-            "要求两边开赛时间戳完全一致，或完整滚球进程（节次、时钟、比分）完全一致"
+            f"home_team_candidates={len(home_candidates)}; EB={eb_home_raw} vs {eb_away_raw}; "
+            "开赛时间按年月日和小时一致，或滚球节次一致、时钟相差不超过1分钟且主客队对应比分各相差不超过5分"
         )
     return candidates[0]
-
 
 def _find_pingbo_totals(event, target_line):
     rows = mapper.flatten_pingbo_markets(event)
@@ -335,6 +413,10 @@ class BrowserSessionBridge:
         self._ignored_event_ids = set()
         self._pingbo_feed_responses = {}
         self._pingbo_capture_confirmed = False
+        self._pingbo_market_payload = None
+        self._pingbo_last_refresh_monotonic = 0.0
+        self._pingbo_refresh_interval_seconds = 20.0
+        self._round_pingbo_matched_event_ids = set()
         self._pending_event_snapshots = {"EB": None, "PINGBO": None}
         self._pending_event_snapshot_lock = threading.Lock()
         self._pending_event_monitor_stop = threading.Event()
@@ -499,6 +581,8 @@ class BrowserSessionBridge:
                 "payload": payload, "captured_at": time.time(),
                 "status": response.status, "event_count": len(events),
             }
+            self._pingbo_market_payload = payload
+            self._pingbo_last_refresh_monotonic = time.monotonic()
             print("【pingBo】[RESPONSE]",
                   f"path={parsed.path.rsplit('/', 1)[-1]}",
                   f"http={response.status}",
@@ -1233,11 +1317,42 @@ class BrowserSessionBridge:
             )
         return eligible_rows
 
+    def _print_event_match_diagnostics(self, eb_events):
+        """Print only the EB/Pingbo NBA home/away team pairs after a fully unmatched round."""
+        print("【EB】[NBA赛事匹配汇总] 本轮 EB NBA 主客场球队：", flush=True)
+        for event in eb_events:
+            home, away = _split_eb_teams(event)
+            print(f"【EB】{home or '?'} vs {away or '?'}", flush=True)
+        path = getattr(self, "_pingbo_active_feed_path", None)
+        record = self._pingbo_feed_responses.get(path, {}) if path else {}
+        payload = self._pingbo_market_payload or record.get("payload")
+        print("【pingBo】[NBA赛事匹配汇总] 本轮 Pingbo NBA 主客场球队：", flush=True)
+        for item in mapper.extract_pingbo_events(payload) if payload is not None else []:
+            print(f"【pingBo】{item.get('home_zh') or item.get('home') or '?'} vs "
+                  f"{item.get('away_zh') or item.get('away') or '?'}", flush=True)
+
     def discover_nba_total_selections(self):
         """Discover NBA events and report safe schema diagnostics if totals cannot be resolved."""
         events = self.discover_nba_events()
         if not events:
             raise RuntimeError("当前列表没有筛选到 NBA 正规赛事，停止盘口请求")
+        self.ensure_pingbo_live_capture()
+        feed_path = getattr(self, "_pingbo_active_feed_path", None)
+        feed_record = self._pingbo_feed_responses.get(feed_path, {}) if feed_path else {}
+        feed_payload = self._pingbo_market_payload or feed_record.get("payload")
+        if feed_payload is not None:
+            matched_events = []
+            for event in events:
+                try:
+                    _find_pingbo_event(feed_payload, event)
+                    matched_events.append(event)
+                except RuntimeError:
+                    continue
+            if not matched_events:
+                self._print_event_match_diagnostics(events)
+                print("【执行节点】本轮 EB NBA 主队/客队或赛事时间与 Pingbo 均未匹配，跳过本轮盘口详情请求。", flush=True)
+                return []
+            events = matched_events
         if not self._odds_request_template:
             _console_prompt(
                 "【页面操作 3】请在 OP7 浏览器打开任意一场 NBA 正规赛事详情，并等待全场大小盘口赔率加载完成。"
@@ -1398,6 +1513,8 @@ class BrowserSessionBridge:
             else:
                 reason = "找到了大小分选项，但缺少构建选项所需字段；请查看 missing_required_fields"
             raise RuntimeError("实时 NBA 全场大小分选项未能完整提取：" + reason)
+        if not selections and not self._round_pingbo_matched_event_ids:
+            self._print_event_match_diagnostics(events)
         return selections
 
     def confirm_and_wait_eb_retry(self, endpoint):
@@ -1440,7 +1557,7 @@ class BrowserSessionBridge:
             raise RuntimeError(f"{path} returned non-JSON response") from None
 
     def ensure_pingbo_live_capture(self):
-        """Require a browser-observed odds-live request and NBA response before matching."""
+        """Reuse a successful initialization; prompt only until the first valid feed arrives."""
         paths = ("/sports-service/sv/mobile/odds-live",
                  "/sports-service/sv/mobile/odds-today")
         def valid_feed(path):
@@ -1449,9 +1566,14 @@ class BrowserSessionBridge:
             return bool(req and record and record.get("event_count", 0) > 0
                         and req.get("url") and record.get("request_params", {}).get("sportId") == "4"
                         and record.get("request_params", {}).get("leagueIds") == "487")
+        if (self._pingbo_capture_confirmed and getattr(self, "_pingbo_active_feed_path", None)
+                and self._pingbo_market_payload is not None):
+            return
         valid_path = next((path for path in paths if valid_feed(path)), None)
         if valid_path:
             self._pingbo_active_feed_path = valid_path
+            self._pingbo_capture_confirmed = True
+            self._pingbo_market_payload = self._pingbo_feed_responses[valid_path]["payload"]
             return
         _console_prompt(
             "【页面操作｜Pingbo 接口初始化】尚未取得有效的 Pingbo NBA 数据。"
@@ -1494,6 +1616,12 @@ class BrowserSessionBridge:
         started = time.monotonic()
         cfg_path = Path(__file__).with_name("refresh_config.json")
         cfg = json.loads(cfg_path.read_text(encoding="utf-8")) if cfg_path.exists() else {}
+        policy_path = Path(__file__).with_name("refresh_policy.json")
+        policy = json.loads(policy_path.read_text(encoding="utf-8")) if policy_path.exists() else {}
+        intervals = policy.get("intervals_seconds", {})
+        self._pingbo_refresh_interval_seconds = float(
+            intervals.get("EB_Pingbo_shared_interval", 20)
+        )
         eb_params = dict((cfg.get("op7") or {}).get("odds_params") or {})
         eb_params["mid"] = str(event["mid"])
         captured_pb = live.CAPTURED_REQUESTS.get(("pingbo", pb_path)) or {}
@@ -1516,18 +1644,41 @@ class BrowserSessionBridge:
             self.op7, eb_origin + eb_path, "GET",
             live.headers_env("OP7_READONLY_HEADERS_JSON"),
             params=eb_params, timeout_ms=self.timeout * 1000, family="eb")
-        print("【pingBo】 正在请求 mobile odds-live 并解析 NBA 赛事数据。", flush=True)
-        pb = live.request_json(
-            self.pingbo, pb_origin + pb_path, "GET",
-            live.headers_env("PINGBO_READONLY_HEADERS_JSON"),
-            params=pb_params, timeout_ms=self.timeout * 1000, family="pingbo")
-        pb = live.unwrap(pb)
+        now = time.monotonic()
+        refresh_pingbo = (
+            self._pingbo_market_payload is None
+            or now - self._pingbo_last_refresh_monotonic >= self._pingbo_refresh_interval_seconds
+        )
+        if refresh_pingbo:
+            # Use the latest browser-observed odds-today/odds-live request template
+            # at the shared EB/Pingbo refresh clock, then cache its NBA response.
+            latest_template = live.CAPTURED_REQUESTS.get(("pingbo", pb_path)) or captured_pb
+            latest_query = dict(parse_qsl(urlsplit(latest_template.get("url", "")).query, keep_blank_values=True))
+            for key in ("sportId", "leagueIds", "periodNumber", "periodNumbers",
+                        "betTypes", "resultingUnit", "locale", "version", "specialName",
+                        "withCredentials"):
+                if key in latest_query:
+                    pb_params[key] = latest_query[key]
+            print("【pingBo】[赔率刷新] 共享时钟到达，读取浏览器最近一次 NBA feed 请求。", flush=True)
+            pb = live.request_json(
+                self.pingbo, pb_origin + pb_path, "GET",
+                live.headers_env("PINGBO_READONLY_HEADERS_JSON"),
+                params=pb_params, timeout_ms=self.timeout * 1000, family="pingbo")
+            pb = live.unwrap(pb)
+            self._pingbo_market_payload = pb
+            self._pingbo_last_refresh_monotonic = time.monotonic()
+        else:
+            pb = self._pingbo_market_payload
+            print("【pingBo】[赔率缓存] 共享刷新周期内复用最近一次 NBA feed 响应。",
+                  f"剩余刷新秒数={max(0, self._pingbo_refresh_interval_seconds - (now - self._pingbo_last_refresh_monotonic)):.1f}",
+                  flush=True)
         pb_events = mapper.extract_pingbo_events(pb)
         print("【pingBo】 odds-live 响应解析完成", f"nba_event_count={len(pb_events)}", flush=True)
         if not pb_events:
             raise RuntimeError("Pingbo odds-live 响应中没有解析到 NBA 赛事；停止赛事映射")
         eb_totals = _find_eb_totals(eb, event["mid"], line)
         pb_event = _find_pingbo_event(pb, event)
+        self._round_pingbo_matched_event_ids.add(str(event.get("mid") or event.get("event_id") or ""))
         pb_totals = _find_pingbo_totals(pb_event, line)
         elapsed = time.monotonic() - started
         if elapsed > 5.0:
