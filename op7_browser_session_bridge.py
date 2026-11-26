@@ -581,10 +581,11 @@ class BrowserSessionBridge:
                 "payload": payload, "captured_at": time.time(),
                 "status": response.status, "event_count": len(events),
             }
-            self._pingbo_market_payload = payload
-            self._pingbo_last_refresh_monotonic = time.monotonic()
-            self._pingbo_active_feed_path = parsed.path
-            self._pingbo_capture_confirmed = True
+            if events:
+                self._pingbo_market_payload = payload
+                self._pingbo_last_refresh_monotonic = time.monotonic()
+                self._pingbo_active_feed_path = parsed.path
+                self._pingbo_capture_confirmed = True
             print("【pingBo】[RESPONSE]",
                   f"path={parsed.path.rsplit('/', 1)[-1]}",
                   f"http={response.status}",
