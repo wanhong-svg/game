@@ -1474,11 +1474,38 @@ class BrowserSessionBridge:
                 f"赛事详情读取 {event_index}/{len(events)}：{event_name}（{home_name or '?'} vs {away_name or '?'}），"
                 "正在获取赛事详情和全场大小盘口。"
             )
-            detail = self.fetch_match_detail(event)
-            diagnostics["details_fetched"] += 1
-            odds = self.fetch_match_odds(event)
+            detail = None
+            try:
+                detail = self.fetch_match_detail(event)
+                diagnostics["details_fetched"] += 1
+                _console_stage(
+                    f"赛事详情读取成功 {event_index}/{len(events)}：{event_name}；详情接口已返回。",
+                )
+            except Exception as exc:
+                _console_stage(
+                    f"赛事详情读取失败 {event_index}/{len(events)}：{event_name}；"
+                    f"异常类型={type(exc).__name__}；继续尝试盘口接口。",
+                )
+
+            try:
+                odds = self.fetch_match_odds(event)
+                _console_stage(
+                    f"赛事盘口读取成功 {event_index}/{len(events)}：{event_name}；"
+                    "已取得 getMatchOddsInfoPB 响应，开始解析全场大小盘口。",
+                )
+            except Exception as exc:
+                _console_stage(
+                    f"赛事盘口读取失败 {event_index}/{len(events)}：{event_name}；"
+                    f"异常类型={type(exc).__name__}；本场跳过，继续下一场。",
+                )
+                continue
+
             odds_data = odds.get("data") if isinstance(odds, dict) else None
             markets = self._detail_market_lists(odds_data)
+            _console_stage(
+                f"赛事盘口解析完成 {event_index}/{len(events)}：{event_name}；"
+                f"盘口记录数={len(markets)}。",
+            )
             if markets:
                 diagnostics["details_with_hps"] += 1
             diagnostics["markets_total"] += len(markets)
