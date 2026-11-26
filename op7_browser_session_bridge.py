@@ -589,6 +589,10 @@ class BrowserSessionBridge:
                 "method": request.method,
                 "url": request.url,
                 "params": stable_params,
+                "timestamp_keys": [
+                    key for key in request_params
+                    if str(key).lower() in timestamp_keys
+                ],
                 "captured_at": time.monotonic(),
             }
             try:
@@ -1777,7 +1781,10 @@ class BrowserSessionBridge:
                         f"Pingbo {pb_path.rsplit('/', 1)[-1]} 请求模板丢失；需要重新初始化"
                     )
                 pb_params = dict(template.get("params") or {})
-                pb_params["_"] = str(int(time.time() * 1000))
+                timestamp_value = str(int(time.time() * 1000))
+                timestamp_keys = template.get("timestamp_keys") or ["_"]
+                for timestamp_key in timestamp_keys:
+                    pb_params[timestamp_key] = timestamp_value
                 required = {
                     "sportId": "4", "leagueIds": "487",
                     "periodNumber": "0", "periodNumbers": "-1", "version": "0",
@@ -1789,7 +1796,7 @@ class BrowserSessionBridge:
                 print(
                     "【pingBo】[赔率刷新] 正在重建请求",
                     f"endpoint={pb_path.rsplit('/', 1)[-1]}",
-                    f"保留动态参数数={len(pb_params) - 1}",
+                    f"保留动态参数数={len(template.get('params') or {})}",
                     flush=True,
                 )
                 response_payload = live.request_json(
