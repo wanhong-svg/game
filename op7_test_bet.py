@@ -695,13 +695,14 @@ def auto_run_once(browser_session, stake, timeout, output_path, candidates=None)
         except Exception:
             return str(raw if raw is not None else "?")
 
-    def log_cross_odds(stage, matchup, line, snapshot):
+    def log_cross_odds(stage, matchup, line, result):
+        snapshot = result.get("snapshot") or result
         print(
             "[赔率快照]",
             f"阶段={stage}", f"赛事={matchup}", f"全场大小={line}",
             f"EB大={snapshot.get('eb_over')}", f"EB小={snapshot.get('eb_under')}",
             f"Pingbo大={snapshot.get('pingbo_over')}", f"Pingbo小={snapshot.get('pingbo_under')}",
-            f"方向={snapshot.get('direction') or '?'}",
+            f"方向={result.get('direction') or '?'}",
             flush=True,
         )
 
