@@ -320,12 +320,26 @@ def extract_pingbo_events(payload):
     return list(unique.values())
 
 def _pingbo_decimal_odds(value):
-    """Convert American odds to decimal; preserve already-decimal values."""
-    value_dec=dec(value)
-    if value_dec is None or value_dec==0: return None
-    if value_dec>1: return value_dec
-    if value_dec<0: return Decimal('1')+(Decimal('100')/abs(value_dec))
-    return Decimal('1')+(value_dec/Decimal('100'))
+    """Convert explicitly signed American odds; preserve unsigned decimal odds."""
+    value_dec = dec(value)
+    if value_dec is None or value_dec == 0:
+        return None
+
+    # The mobile API supplies American prices as strings such as "+110"/"-152".
+    # A leading sign identifies that format; do not mistake +110 for decimal 110.0.
+    raw_text = str(value).strip()
+    is_signed_american = raw_text.startswith(("+", "-"))
+    if is_signed_american:
+        if abs(value_dec) <= 1:
+            return None
+        if value_dec > 0:
+            return Decimal("1") + (value_dec / Decimal("100"))
+        return Decimal("1") + (Decimal("100") / abs(value_dec))
+
+    # Legacy feeds may already provide decimal odds without an explicit sign.
+    if value_dec > 1:
+        return value_dec
+    return None
 
 def flatten_pingbo_markets(event):
     """Flatten full-game totals from mobile periods['0'].overUnder."""
