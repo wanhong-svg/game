@@ -184,7 +184,7 @@ def select_eb_full_game_total(event, line, side, *, match_type, place_num,
 
 
 def validate_cross_odds_snapshot(snapshot, threshold=Decimal("1.0052")):
-    """Apply the agreed A/B reciprocal-sum rule to one fresh two-book snapshot."""
+    """Check both reciprocal-sum directions; only EB Under can ever be selected."""
     required = ("eb_under", "eb_over", "pingbo_over", "pingbo_under",
                 "eb_under_line", "pingbo_over_line")
     missing = [k for k in required if snapshot.get(k) in (None, "")]
@@ -195,17 +195,23 @@ def validate_cross_odds_snapshot(snapshot, threshold=Decimal("1.0052")):
         raise ValueError("fresh cross-odds snapshot contains invalid numeric values")
     if any(vals[k] <= 1 for k in ("eb_under", "eb_over", "pingbo_over", "pingbo_under")):
         raise ValueError("all four fresh odds must be greater than 1.00")
-    if vals["eb_under_line"] < vals["pingbo_over_line"]:
-        raise ValueError("EB Under line is below Pingbo Over line")
-    a = Decimal(1) / vals["pingbo_over"] + Decimal(1) / vals["eb_under"]
-    b = Decimal(1) / vals["pingbo_under"] + Decimal(1) / vals["eb_over"]
-    pass_a, pass_b = a < threshold, b < threshold
-    if pass_a == pass_b:
-        raise ValueError("cross-odds result is ambiguous or not profitable; no candidate")
+    if vals["eb_under_line"] != vals["pingbo_over_line"]:
+        raise ValueError(
+            f"full-game total lines must match exactly: EB={vals['eb_under_line']} "
+            f"Pingbo={vals['pingbo_over_line']}"
+        )
+    under_sum = Decimal(1) / vals["pingbo_over"] + Decimal(1) / vals["eb_under"]
+    over_sum = Decimal(1) / vals["pingbo_under"] + Decimal(1) / vals["eb_over"]
+    under_pass, over_pass = under_sum < threshold, over_sum < threshold
+    direction = "Under" if under_pass and not over_pass else (
+        "Over" if over_pass and not under_pass else None
+    )
     return {
-        "direction": "Under" if pass_a else "Over",
-        "a_reciprocal_sum": str(a), "b_reciprocal_sum": str(b),
-        "a_pass": pass_a, "b_pass": pass_b, "threshold": str(threshold),
+        "direction": direction,
+        "a_reciprocal_sum": str(under_sum), "b_reciprocal_sum": str(over_sum),
+        "a_pass": under_pass, "b_pass": over_pass,
+        "under_pass": under_pass, "over_pass": over_pass,
+        "threshold": str(threshold),
     }
 
 
@@ -432,8 +438,10 @@ def submit_test_bet(selection, stake, timeout=15, cross_odds_refresh=None, brows
     _set_execution_stage("投注前最后一次 EB/Pingbo 赔率复核")
     cross_check = refresh_and_validate_cross_odds(cross_odds_refresh, max_seconds=5.0)
     selected_side = str(selection["option"].get("ot") or "").lower()
-    if selected_side != cross_check["direction"].lower():
-        raise RuntimeError("候选方向与最新A/B复核方向不一致；禁止发送投注")
+    if selected_side != "under":
+        raise RuntimeError("最终投注方向仅允许 EB Under；EB Over 仅记录日志，不得提交")
+    if cross_check.get("direction") != "Under" or not cross_check.get("under_pass"):
+        raise RuntimeError("最新双向赔率校验未满足唯一 EB Under 投注条件；禁止发送投注")
     fresh_key = "eb_" + selected_side
     fresh_decimal_odds = as_decimal(cross_check["snapshot"].get(fresh_key))
     if fresh_decimal_odds is None or fresh_decimal_odds <= 1:
@@ -537,8 +545,8 @@ def submit_test_bet(selection, stake, timeout=15, cross_odds_refresh=None, brows
         # The same-payload retry failed: compare this exact event/market once more.
         try:
             refreshed_cross = refresh_and_validate_cross_odds(cross_odds_refresh, max_seconds=5.0)
-            if str(refreshed_cross.get("direction") or "").lower() != selected_side:
-                raise RuntimeError("重新比较后的方向已变化")
+            if selected_side != "under" or refreshed_cross.get("direction") != "Under" or not refreshed_cross.get("under_pass"):
+                raise RuntimeError("重新比较后 EB Under 条件不再满足；禁止投注")
             refreshed_eb_odds = as_decimal(refreshed_cross.get("snapshot", {}).get("eb_" + selected_side))
             if refreshed_eb_odds is None or refreshed_eb_odds <= 1:
                 raise RuntimeError("重新比较未取得有效 EB 赔率")
@@ -702,9 +710,33 @@ def auto_run_once(browser_session, stake, timeout, output_path, candidates=None)
             f"阶段={stage}", f"赛事={matchup}", f"全场大小={line}",
             f"EB大={snapshot.get('eb_over')}", f"EB小={snapshot.get('eb_under')}",
             f"Pingbo大={snapshot.get('pingbo_over')}", f"Pingbo小={snapshot.get('pingbo_under')}",
-            f"方向={result.get('direction') or '?'}",
+            f"Under校验和={result.get('a_reciprocal_sum')}",
+            f"Over校验和={result.get('b_reciprocal_sum')}",
+            f"Under通过={result.get('under_pass')}",
+            f"Over通过={result.get('over_pass')}",
             flush=True,
         )
+
+    def log_eb_decision(allowed, stage, matchup, event_id, line, result):
+        snapshot = result.get("snapshot") or result
+        prefix = "【-- EB允许--】" if allowed else "【-- EB禁止--】"
+        reason = (
+            "EB Under 双向校验唯一通过，允许进入投注流程"
+            if allowed else
+            ("EB Over 校验通过但最终方向仅允许 Under，匹配成功但不满足投注要求，未投注"
+             if result.get("over_pass") and not result.get("under_pass")
+             else "EB Under 未满足唯一通过条件，未投注")
+        )
+        details = (
+            f"阶段={stage} 赛事={matchup} event_id={event_id} 全场大小={line} "
+            f"EB Under={snapshot.get('eb_under')} EB Over={snapshot.get('eb_over')} "
+            f"Pingbo Over={snapshot.get('pingbo_over')} Pingbo Under={snapshot.get('pingbo_under')} "
+            f"Under校验和={result.get('a_reciprocal_sum')} Over校验和={result.get('b_reciprocal_sum')} "
+            f"Under通过={result.get('under_pass')} Over通过={result.get('over_pass')} "
+            f"结果={reason}"
+        )
+        for index in range(1, 7):
+            print(f"{prefix} [{index}/6] {details}", flush=True)
 
     if candidates is None:
         print("[执行节点] 正在重新读取当日 NBA 赛事列表及全场大小盘口。", flush=True)
@@ -758,13 +790,18 @@ def auto_run_once(browser_session, stake, timeout, output_path, candidates=None)
                 first_cross = refresh_and_validate_cross_odds(
                     lambda p=probe: browser_session.refresh_cross_odds(p), max_seconds=5.0
                 )
-                first_side = first_cross["direction"].lower()
                 log_cross_odds("首次校验", matchup, line, first_cross)
+                if first_cross.get("direction") == "Over":
+                    log_eb_decision(False, "首次校验", matchup, event_id, line, first_cross)
+                    continue
+                if first_cross.get("direction") != "Under" or not first_cross.get("under_pass"):
+                    log_eb_decision(False, "首次校验", matchup, event_id, line, first_cross)
+                    continue
                 first_candidate = next((
                     item for item in event_candidates
                     if str(item["market"].get("hpid")) == group_key[0]
                     and str(item["group"].get("hid")) == group_key[1]
-                    and str(item["option"].get("ot") or "").lower() == first_side
+                    and str(item["option"].get("ot") or "").lower() == "under"
                 ), None)
                 if first_candidate is None:
                     continue
@@ -775,18 +812,20 @@ def auto_run_once(browser_session, stake, timeout, output_path, candidates=None)
                 second_cross = refresh_and_validate_cross_odds(
                     lambda p=first_candidate: browser_session.refresh_cross_odds(p), max_seconds=5.0
                 )
-                second_side = second_cross["direction"].lower()
                 log_cross_odds("二次校验", matchup, line, second_cross)
+                if second_cross.get("direction") != "Under" or not second_cross.get("under_pass"):
+                    log_eb_decision(False, "二次校验", matchup, event_id, line, second_cross)
+                    continue
                 candidate = next((
                     item for item in event_candidates
                     if str(item["market"].get("hpid")) == group_key[0]
                     and str(item["group"].get("hid")) == group_key[1]
-                    and str(item["option"].get("ot") or "").lower() == second_side
+                    and str(item["option"].get("ot") or "").lower() == "under"
                 ), None)
                 if candidate is None:
                     continue
-                for success_log_index in range(1, 6):
-                    print("[盘口匹配成功]", f"第{success_log_index}/5次", f"赛事={matchup}", f"全场大小={line}", f"方向={second_side}", flush=True)
+                log_eb_decision(True, "二次校验", matchup, event_id, line, second_cross)
+                second_side = "under"
                 print("[执行节点]", "二次校验通过，正在读取最新投注限额并组装投注参数。", flush=True)
                 selection = _selection_with_runtime(candidate)
                 saved_path = _write_selection_file(selection, output_path)
