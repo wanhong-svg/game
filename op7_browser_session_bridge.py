@@ -1715,7 +1715,7 @@ class BrowserSessionBridge:
             raise RuntimeError(
                 "Pingbo NBA 双接口初始化未完成：缺少有效请求/响应 "
                 + ", ".join(missing)
-                + "；请确认两个接口的五个筛选参数均匹配且响应中包含 NBA 赛事。"
+                + "；请确认两个接口的五个筛选参数均匹配且接口成功返回响应。"
             )
 
         self._pingbo_capture_confirmed = True
