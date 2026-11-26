@@ -170,10 +170,12 @@ def capture_request(request, family):
      query_params.update(urllib.parse.parse_qs(posted, keep_blank_values=True))
    except Exception:
     pass
+  required_pingbo_params={
+   'sportId':['4'],'leagueIds':['487'],'periodNumber':['0'],
+   'periodNumbers':['-1'],'version':['0']}
   pingbo_nba_feed=(api_family=='pingbo'
    and p.path in ('/sports-service/sv/mobile/odds-live','/sports-service/sv/mobile/odds-today')
-   and query_params.get('sportId')==['4']
-   and query_params.get('leagueIds')==['487'])
+   and all(query_params.get(k)==v for k,v in required_pingbo_params.items()))
   allowed=(p.path in eb_allowed) if api_family=='eb' else (p.path in known_paths)
   if pingbo_nba_feed:
    allowed=True
