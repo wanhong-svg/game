@@ -1326,19 +1326,43 @@ class BrowserSessionBridge:
             )
         return eligible_rows
 
-    def _print_event_match_diagnostics(self, eb_events):
-        """Print only the EB/Pingbo NBA home/away team pairs after a fully unmatched round."""
-        print("【EB】[NBA赛事匹配汇总] 本轮 EB NBA 主客场球队：", flush=True)
+    def _print_event_match_diagnostics(self, eb_events, eb_totals_by_id=None):
+        """Print both feeds' NBA fixtures and full-game total lines/odds after an unmatched round."""
+        eb_totals_by_id = eb_totals_by_id or {}
+        print("【EB】[NBA赛事汇总] 主客场球队及全场大小盘口：", flush=True)
         for event in eb_events:
             home, away = _split_eb_teams(event)
-            print(f"【EB】{home or '?'} vs {away or '?'}", flush=True)
+            event_id = str(event.get("mid") or "")
+            print(f"【EB】{home or '?'} vs {away or '?'}", end="", flush=True)
+            totals = eb_totals_by_id.get(event_id, [])
+            if not totals:
+                print(" | 全场大小：暂无可用盘口数据", flush=True)
+                continue
+            print(" | 全场大小：", flush=True)
+            for row in totals:
+                print(
+                    f"【EB】  盘口线={row.get('line') or '?'} "
+                    f"方向={row.get('side') or '?'} 赔率={row.get('odds') or '?'}",
+                    flush=True,
+                )
         path = getattr(self, "_pingbo_active_feed_path", None)
         record = self._pingbo_feed_responses.get(path, {}) if path else {}
         payload = self._pingbo_market_payload or record.get("payload")
-        print("【pingBo】[NBA赛事匹配汇总] 本轮 Pingbo NBA 主客场球队：", flush=True)
+        print("【pingBo】[NBA赛事汇总] 主客场球队及全场大小盘口：", flush=True)
         for item in mapper.extract_pingbo_events(payload) if payload is not None else []:
             print(f"【pingBo】{item.get('home_zh') or item.get('home') or '?'} vs "
-                  f"{item.get('away_zh') or item.get('away') or '?'}", flush=True)
+                  f"{item.get('away_zh') or item.get('away') or '?'}", end="", flush=True)
+            totals = mapper.flatten_pingbo_markets(item)
+            if not totals:
+                print(" | 全场大小：暂无可用盘口数据", flush=True)
+                continue
+            print(" | 全场大小：", flush=True)
+            for row in totals:
+                print(
+                    f"【pingBo】  盘口线={row.get('line') or '?'} "
+                    f"方向={row.get('side') or '?'} 赔率={row.get('display_europe') or row.get('decimal_odds') or '?'}",
+                    flush=True,
+                )
 
     def discover_nba_total_selections(self):
         """Discover NBA events and report safe schema diagnostics if totals cannot be resolved."""
@@ -1350,6 +1374,7 @@ class BrowserSessionBridge:
         feed_record = self._pingbo_feed_responses.get(feed_path, {}) if feed_path else {}
         feed_payload = self._pingbo_market_payload or feed_record.get("payload")
         self._round_pingbo_matched_event_ids = set()
+        no_pingbo_matches = False
         if feed_payload is not None:
             matched_events = []
             for event in events:
@@ -1360,10 +1385,12 @@ class BrowserSessionBridge:
                 except RuntimeError:
                     continue
             if not matched_events:
-                self._print_event_match_diagnostics(events)
-                print("【执行节点】本轮 EB NBA 主队/客队或赛事时间与 Pingbo 均未匹配，跳过本轮盘口详情请求。", flush=True)
-                return []
-            events = matched_events
+                # Still fetch EB details for every fixture so the unmatched-round
+                # summary can include each side's full-game total lines and odds.
+                no_pingbo_matches = True
+                print("【执行节点】本轮 EB NBA 与 Pingbo 匹配数为 0；继续读取 EB 盘口详情，稍后汇总双方球队及大小盘。", flush=True)
+            else:
+                events = matched_events
         if not self._odds_request_template:
             _console_prompt(
                 "【页面操作 3】请在 OP7 浏览器打开任意一场 NBA 正规赛事详情，并等待全场大小盘口赔率加载完成。"
@@ -1398,6 +1425,7 @@ class BrowserSessionBridge:
             _console_stage("运行参数已初始化，跳过页面操作 4。")
 
         selections = []
+        eb_totals_by_id = {}
         diagnostics = {
             "nba_events": len(events),
             "details_fetched": 0,
@@ -1484,6 +1512,21 @@ class BrowserSessionBridge:
                         side = str(option.get("ot") or "").strip().lower()
                         if side not in {"under", "over"}:
                             continue
+                        event_summary = eb_totals_by_id.setdefault(str(event.get("mid") or ""), [])
+                        line_value = group.get("hv")
+                        odds_value = option.get("ov")
+                        try:
+                            odds_decimal = Decimal(str(odds_value))
+                            if odds_decimal > Decimal("1000"):
+                                odds_decimal /= Decimal("100000")
+                            odds_text = format(odds_decimal, ".5f").rstrip("0").rstrip(".")
+                        except Exception:
+                            odds_text = str(odds_value) if odds_value is not None else None
+                        event_summary.append({
+                            "line": str(line_value) if line_value is not None else None,
+                            "side": side,
+                            "odds": odds_text,
+                        })
                         diagnostics["over_under_options"] += 1
                         add_field_names("option_field_names", option)
                         required = {
@@ -1510,9 +1553,14 @@ class BrowserSessionBridge:
                             "event": event, "market": market, "group": group,
                             "option": option, "runtime_context": runtime_context,
                         })
+        if no_pingbo_matches:
+            self._print_event_match_diagnostics(events, eb_totals_by_id)
+            print("【执行节点】本轮 NBA 赛事匹配成功数量=0；已输出 EB/Pingbo 双方赛事及全场大小盘口信息，跳过赔率比较，继续下一轮轮询。",
+                  flush=True)
+            return selections
         if not selections:
             if not self._round_pingbo_matched_event_ids:
-                self._print_event_match_diagnostics(events)
+                self._print_event_match_diagnostics(events, eb_totals_by_id)
             print("\\n=== EB NBA 大小分字段诊断（仅字段名和计数，不含请求凭证或原始响应） ===")
             print(json.dumps(diagnostics, ensure_ascii=False, indent=2))
             if not events:
