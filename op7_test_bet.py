@@ -5,6 +5,7 @@ import contextlib
 import io
 import argparse
 import hashlib
+import secrets
 import ipaddress
 import time
 import threading
@@ -409,12 +410,20 @@ def submit_test_bet(selection, stake, timeout=15, cross_odds_refresh=None, brows
     if not isinstance(odds_value, (int, float)) or int(odds_value) <= 100000:
         raise RuntimeError("latest odds value is invalid; stopped before bet")
 
-    amount = as_decimal(stake)
-    if amount is None or amount != Decimal("100"):
-        raise RuntimeError("本流程固定每笔模拟投注 100 元；金额不一致，已停止")
-    max_test_stake = as_decimal(os.environ.get("OP7_TEST_BET_MAX_STAKE", "100"))
+    # Pick one integer stake per candidate, inclusive 50..150 yuan.
+    # The chosen amount is held constant through all validation/retry steps.
+    amount = Decimal(secrets.randbelow(101) + 50)
+    print(
+        "[投注金额] 本次随机金额="
+        + format(amount, "f")
+        + " 元（随机范围：50-150 元，含边界）",
+        flush=True,
+    )
+    max_test_stake = as_decimal(os.environ.get("OP7_TEST_BET_MAX_STAKE", "150"))
     if max_test_stake is None or amount > max_test_stake:
-        raise RuntimeError("stake exceeds OP7_TEST_BET_MAX_STAKE; stopped before bet")
+        raise RuntimeError(
+            f"随机投注金额 {amount} 超过 OP7_TEST_BET_MAX_STAKE={max_test_stake}；已停止"
+        )
 
     if cross_odds_refresh is None and browser_session is not None:
         cross_odds_refresh = lambda: browser_session.refresh_cross_odds(selection)
@@ -821,7 +830,7 @@ def main():
     parser = argparse.ArgumentParser(description="Build or submit one local-test OP7/EB wager")
     parser.add_argument("--input", help="optional legacy JSON; omitted when using --discover-nba")
     parser.add_argument("--discover-nba", action="store_true", help="read live EB NBA events/total markets; read-only, no order submission")
-    parser.add_argument("--stake", default="100", help="fixed simulated test stake in yuan (default: 100)")
+    parser.add_argument("--stake", default="random", help="legacy compatibility only; submitted amount is randomly selected from 50 to 150 yuan")
     parser.add_argument("--submit-test", action="store_true", help="send only after local-test guards pass")
     parser.add_argument("--timeout", type=int, default=15)
     parser.add_argument("--profiles-dir", default="browser_profiles")
