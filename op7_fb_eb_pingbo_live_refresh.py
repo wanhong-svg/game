@@ -256,7 +256,7 @@ def _analysis_append(record):
   record={'recorded_at_utc':now(),**_analysis_redact(record)}
   with PINGBO_ANALYSIS_LOCK:
    PINGBO_ANALYSIS_FILE.parent.mkdir(parents=True,exist_ok=True)
-  with PINGBO_ANALYSIS_FILE.open('a',encoding='utf-8') as fh:
+   with PINGBO_ANALYSIS_FILE.open('a',encoding='utf-8') as fh:
     fh.write(json.dumps(record,ensure_ascii=False,default=str)+'\n')
  except Exception as exc:
   print(f'[Pingbo分析] 本地日志写入失败：{type(exc).__name__}: {exc}',file=sys.stderr,flush=True)
@@ -287,10 +287,11 @@ def _pingbo_page_response(response, page):
   global PINGBO_BROWSER_EVENTS,PINGBO_BROWSER_EVENTS_AT,PINGBO_BROWSER_EVENTS_SOURCE
   decoded=unwrap(payload)
   browser_events=mapper.extract_pingbo_events(decoded)
-  if browser_events:
-   PINGBO_BROWSER_EVENTS=browser_events
-   PINGBO_BROWSER_EVENTS_AT=now()
-   PINGBO_BROWSER_EVENTS_SOURCE=parsed.path
+  # Refresh the cache even when the page response contains zero NBA events;
+  # otherwise an old non-empty response can be reused after the page is empty.
+  PINGBO_BROWSER_EVENTS=browser_events
+  PINGBO_BROWSER_EVENTS_AT=now()
+  PINGBO_BROWSER_EVENTS_SOURCE=parsed.path
   ui_text=''
   try: ui_text=page.locator('body').inner_text(timeout=1500)[:100000]
   except Exception: pass
@@ -527,13 +528,14 @@ def main():
  policy=json.loads(Path(a.policy).read_text(encoding='utf-8'))
  intervals=policy.get('intervals_seconds',{})
  a.fb_list_interval=a.fb_list_interval or intervals.get('FB_event_list',30)
- a.fb_odds_interval=intervals.get('FB_single_event_odds',20)
+ a.fb_odds_interval=a.fb_odds_interval or intervals.get('FB_single_event_odds',20)
  a.eb_list_interval=a.eb_list_interval or intervals.get('EB_event_list',5)
- # EB odds and Pingbo event+embedded-odds refresh share one policy interval.
+ # EB odds and Pingbo event+embedded-odds share the policy interval by default;
+ # explicit CLI values override it for controlled diagnostics.
  eb_pingbo_interval=intervals.get('EB_Pingbo_shared_interval',20)
- a.eb_odds_interval=eb_pingbo_interval
- a.pingbo_interval=eb_pingbo_interval
- vals=[a.fb_list_interval,a.eb_list_interval,a.timeout]
+ a.eb_odds_interval=a.eb_odds_interval or eb_pingbo_interval
+ a.pingbo_interval=a.pingbo_interval or eb_pingbo_interval
+ vals=[a.fb_list_interval,a.fb_odds_interval,a.eb_list_interval,a.eb_odds_interval,a.pingbo_interval,a.timeout]
  if min(vals)<5: ap.error('赛事列表刷新间隔及超时不得低于5秒')
  cfg=json.loads(Path(a.config).read_text(encoding='utf-8'))
  op=cfg.get('op7',{}); pb=cfg.get('part567',{})
@@ -581,17 +583,18 @@ def main():
     tick=time.monotonic()
     if a.max_runtime and tick-started>=a.max_runtime: break
     # FB list
-    if tick-clocks['fb_list']>=a.fb_list_interval or not fb_list:
+    if tick-clocks['fb_list']>=a.fb_list_interval:
      try:
       res=request_json(opctx,SITES['FB_ORIGIN']+'/v1/match/getList','POST',oh,body=fb_body,timeout_ms=a.timeout*1000,family='fb')
       fb_list=fb_events(res); save_latest(out,'FB_events',fb_list); clocks['fb_list']=time.monotonic()
       print(f'[{now()}] FB赛事列表刷新：{len(fb_list)}场')
      except Exception as e:
       save_failure(out,'FB_events',e); print(f'FB列表刷新失败：{type(e).__name__}: {e}',file=sys.stderr)
+      clocks['fb_list']=time.monotonic()
       if isinstance(e,AuthenticationRequired): auth_failure=e
     if auth_failure: report_auth_failure(auth_failure,a); break
     # EB list
-    if tick-clocks['eb_list']>=a.eb_list_interval or not eb_list:
+    if tick-clocks['eb_list']>=a.eb_list_interval:
      try:
       # Use the exact list endpoint observed in the authenticated EB page.
       # The current page may use noLiveMatchesPagePB rather than matchesPagePB.
@@ -606,10 +609,11 @@ def main():
       print(f'[{now()}] EB赛事列表刷新：{len(eb_list)}场（接口={eb_list_path}，解析={len(eb_rows)}，NBA过滤后={len(eb_list)}）')
      except Exception as e:
       save_failure(out,'EB_events',e); print(f'EB列表刷新失败：{type(e).__name__}: {e}',file=sys.stderr)
+      clocks['eb_list']=time.monotonic()
       if isinstance(e,AuthenticationRequired): auth_failure=e
     if auth_failure: report_auth_failure(auth_failure,a); break
     # Pingbo list + embedded markets
-    if tick-clocks['pb']>=a.pingbo_interval or not pb_list:
+    if tick-clocks['pb']>=a.pingbo_interval:
      try:
       pb_params=dict(pb_q); pb_params.setdefault('_',str(int(time.time()*1000)))
       res=request_json(pbctx,SITES['PINGBO_ORIGIN']+'/sports-service/sv/compact/events','GET',ph,params=pb_params,timeout_ms=a.timeout*1000,family='pingbo')
@@ -622,7 +626,9 @@ def main():
       if PINGBO_BROWSER_EVENTS_AT:
        try: browser_age=(datetime.now(timezone.utc)-datetime.fromisoformat(PINGBO_BROWSER_EVENTS_AT.replace('Z','+00:00'))).total_seconds()
        except Exception: browser_age=None
-      if browser_rows and (browser_age is None or browser_age<=max(120,a.pingbo_interval*4)):
+      if PINGBO_BROWSER_EVENTS_AT and browser_age is not None and 0<=browser_age<=max(120,a.pingbo_interval*4):
+       # A recent empty browser response is meaningful too; do not silently
+       # replace it with a stale compact-feed result.
        pb_rows=browser_rows
        pb_source=f'browser:{PINGBO_BROWSER_EVENTS_SOURCE}'
       else:
@@ -639,6 +645,7 @@ def main():
       print(f'[{now()}] Pingbo赛事+内嵌盘口刷新：{len(pb_list)}场 / {len(pb_markets)}条当前盘口记录（数据源={pb_source}，接口解析={len(pb_rows)}，NBA过滤后={len(pb_list)}）')
      except Exception as e:
       save_failure(out,'Pingbo_events',e); print(f'Pingbo刷新失败：{type(e).__name__}: {e}',file=sys.stderr)
+      clocks['pb']=time.monotonic()
       if isinstance(e,AuthenticationRequired): auth_failure=e
     if auth_failure: report_auth_failure(auth_failure,a); break
     # FB event details / odds
