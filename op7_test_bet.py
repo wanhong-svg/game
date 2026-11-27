@@ -149,6 +149,12 @@ def select_eb_full_game_total(event, line, side, *, match_type, place_num,
     for market in event.get("hps") or []:
         if not isinstance(market, dict) or str(market.get("hpid")) != "38":
             continue
+        # Both ordinary and additional full-game totals use hpid=38.
+        # Resolve only the ordinary market using its confirmed name and topKey.
+        market_name = str(market.get("hpn") or "").strip()
+        top_key = str(market.get("topKey") or market.get("hpid") or "")
+        if market_name != "全场大小" or top_key != "38":
+            continue
         for group in market.get("hl") or []:
             if not isinstance(group, dict):
                 continue
@@ -232,8 +238,9 @@ def refresh_and_validate_cross_odds(refresh_both, max_seconds=5.0):
 def _candidate_key(selection):
     event, market, group, option = (selection[k] for k in ("event", "market", "group", "option"))
     raw = "|".join(str(x) for x in (
-        event.get("mid"), market.get("hpid"), group.get("hid"),
-        option.get("oid"), option.get("ot"), group.get("hv")
+        event.get("mid"), market.get("hpid"), market.get("topKey"),
+        market.get("hpn"), group.get("hid"), option.get("oid"),
+        option.get("ot"), group.get("hv")
     ))
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
