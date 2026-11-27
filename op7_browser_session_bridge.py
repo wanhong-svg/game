@@ -1459,6 +1459,8 @@ class BrowserSessionBridge:
             "details_with_hps": 0,
             "markets_total": 0,
             "markets_hpid_38": 0,
+            "markets_standard_total": 0,
+            "markets_additional_total": 0,
             "groups_hpid_38": 0,
             "over_under_options": 0,
             "complete_options": 0,
@@ -1548,11 +1550,18 @@ class BrowserSessionBridge:
                     name = market.get("hpn") or market.get("name") or market.get("hn")
                     if name not in (None, ""):
                         diagnostics["market_name_samples"].append(str(name)[:100])
-                # Only standard EB full-game totals are eligible; exclude additional totals.
-                target_market = (market_name == "全场大小" and top_key == "38")
+                # Both confirmed EB full-game total markets are eligible.
+                target_market = (
+                    (market_name == "全场大小" and top_key == "38")
+                    or (market_name == "全场大小-附加盘" and top_key == "38-1")
+                )
                 if not target_market:
                     continue
                 diagnostics["markets_hpid_38"] += 1
+                if market_name == "全场大小":
+                    diagnostics["markets_standard_total"] += 1
+                else:
+                    diagnostics["markets_additional_total"] += 1
                 for group in market.get("hl") or []:
                     if not isinstance(group, dict):
                         continue
