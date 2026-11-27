@@ -16,7 +16,7 @@ ENDPOINTS=json.loads((Path(__file__).with_name('endpoints.json')).read_text(enco
 SITES={
  'OP7_WEB':ENDPOINTS['web']['op7']['base_url'],
  'FB_ORIGIN':ENDPOINTS['apis']['fb']['base_url'],
- 'EB_ORIGIN':ENDPOINTS['apis']['eb']['base_url'],
+ 'EB_ORIGIN':ENDPOINTS['apis']['eb'].get('nba_read_base_url') or ENDPOINTS['apis']['eb']['base_url'],
  'PINGBO_WEB':ENDPOINTS['web']['pingbo']['base_url'],
  'PINGBO_ORIGIN':ENDPOINTS['apis']['pingbo']['base_url'],
 }
@@ -25,6 +25,15 @@ ALLOW={}
 for api in ENDPOINTS['apis'].values():
  for host in api.get('hosts',[]):
   ALLOW[host]=set(api.get('read_paths',[]))
+
+def h5_context_options(playwright):
+ """Return Chromium context options for a visible iPhone-class H5 browser."""
+ device_name='iPhone 13'
+ device=playwright.devices.get(device_name)
+ if not device:
+  raise RuntimeError(f'Playwright device profile not available: {device_name}')
+ keys=('user_agent','viewport','device_scale_factor','is_mobile','has_touch')
+ return device_name,{k:device[k] for k in keys if k in device}
 
 def now(): return datetime.now(timezone.utc).isoformat(timespec='milliseconds')
 def headers_env(name):
@@ -612,7 +621,9 @@ def setup_session(site,profiles_dir):
    url,label=sites[key]; profile=Path(profiles_dir)/key; profile.mkdir(parents=True,exist_ok=True)
    print(f'\n正在打开 {label} 可见浏览器。请自行输入账号密码并完成验证码/MFA。')
    print('程序不会读取、记录或上传密码、验证码、Cookie 或 Token。')
-   ctx=p.chromium.launch_persistent_context(str(profile),headless=False,args=['--no-sandbox','--disable-dev-shm-usage'])
+   device_name,h5_options=h5_context_options(p)
+   ctx=p.chromium.launch_persistent_context(str(profile),headless=False,args=['--no-sandbox','--disable-dev-shm-usage'],**h5_options)
+   print(f'{label} 浏览器模式：H5 移动端（{device_name}，viewport={h5_options.get("viewport")}）')
    try:
     page=ctx.pages[0] if ctx.pages else ctx.new_page()
     try: page.goto(url,wait_until='domcontentloaded',timeout=30000)
@@ -680,8 +691,11 @@ def main():
  PINGBO_ANALYSIS_FILE.touch(exist_ok=False) if not PINGBO_ANALYSIS_FILE.exists() else None
  print(f'[Pingbo分析] 页面自动请求、脚本请求/响应及页面可见变化将记录到：{PINGBO_ANALYSIS_FILE.resolve()}')
  with sync_playwright() as p:
-  opctx=p.chromium.launch_persistent_context(str(profiles/'op7'),headless=False,args=['--no-sandbox','--disable-dev-shm-usage'])
-  pbctx=p.chromium.launch_persistent_context(str(profiles/'pingbo'),headless=False,args=['--no-sandbox','--disable-dev-shm-usage'])
+  device_name,h5_options=h5_context_options(p)
+  opctx=p.chromium.launch_persistent_context(str(profiles/'op7'),headless=False,args=['--no-sandbox','--disable-dev-shm-usage'],**h5_options)
+  pbctx=p.chromium.launch_persistent_context(str(profiles/'pingbo'),headless=False,args=['--no-sandbox','--disable-dev-shm-usage'],**h5_options)
+  print(f'浏览器模式：H5 移动端（{device_name}，viewport={h5_options.get("viewport")}，is_mobile={h5_options.get("is_mobile")}，has_touch={h5_options.get("has_touch")}）')
+  _analysis_append({'kind':'browser_context_mode','mode':'H5_mobile','device':device_name,'viewport':h5_options.get('viewport'),'device_scale_factor':h5_options.get('device_scale_factor'),'is_mobile':h5_options.get('is_mobile'),'has_touch':h5_options.get('has_touch')})
   try:
    for ctx,url,label,family in ((opctx,SITES['OP7_WEB'],'OP7','op7'),(pbctx,SITES['PINGBO_WEB'],'Pingbo','pingbo')):
     page=ctx.pages[0] if ctx.pages else ctx.new_page()
