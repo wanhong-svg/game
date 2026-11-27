@@ -38,7 +38,8 @@ READ_PATHS = {LIST_PATH, LIVE_PATH, EVENT_PATH, LEAGUES_PATH, SPORTS_PATH,
 
 
 ANALYSIS_DIR = Path(os.environ.get("PINGBO_API_ANALYSIS_DIR", str(Path("live_snapshots") / "pingbo_api_analysis")))
-ANALYSIS_FILE = ANALYSIS_DIR / "pingbo_api_trace.jsonl"
+ANALYSIS_STAMP = time.strftime("%Y%m%d_%H%M%S", time.localtime()) + f"_{time.time_ns() % 1_000_000_000:09d}"
+ANALYSIS_FILE = Path(os.environ.get("PINGBO_API_ANALYSIS_FILE", str(ANALYSIS_DIR / f"pingbo_api_trace_{ANALYSIS_STAMP}.jsonl")))
 SENSITIVE_KEYS = ("cookie", "token", "authorization", "password", "passwd", "secret", "session", "credential")
 
 def _redact(value: Any) -> Any:
