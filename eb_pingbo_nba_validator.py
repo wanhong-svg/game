@@ -230,27 +230,29 @@ def run_validation(eb_rows,pb,min_edge=None):
                 out.append({**common,"rule_status":"ANOMALY_BOTH_DIRECTIONS",
                     "rule_reason":"两个交叉方向同时低于 1.0052，标记异常，不生成候选赔率"})
             elif not a_pass and not b_pass:
-                out.append({**common,"rule_status":"NO_MATCH",
-                    "rule_reason":"两个交叉方向均未满足严格小于 1.0052"})
+                # No qualifying reciprocal sum: do not emit a match row.
+                continue
             elif a_pass:
                 out.append({**common,"candidate_side":"EB_UNDER","candidate_odds_decimal":str(eb_under),
+                    "matched_eb_side":"Under","matched_eb_odds_decimal":str(eb_under),
                     "pingbo_selection":"Over","pingbo_odds_decimal":str(pb_over),
                     "reciprocal_sum":str(a_total),"rule_status":"CANDIDATE_A",
-                    "rule_reason":"仅 Pingbo 大分 + EB 小分方向满足阈值"})
+                    "rule_reason":"仅 Pingbo 大分 + EB 小分方向满足阈值，允许投注 EB 小分"})
             else:
-                out.append({**common,"candidate_side":"EB_OVER","candidate_odds_decimal":str(eb_over),
+                out.append({**common,"matched_eb_side":"Over","matched_eb_odds_decimal":str(eb_over),
                     "pingbo_selection":"Under","pingbo_odds_decimal":str(pb_under),
-                    "reciprocal_sum":str(b_total),"rule_status":"CANDIDATE_B",
-                    "rule_reason":"仅 Pingbo 小分 + EB 大分方向满足阈值"})
+                    "reciprocal_sum":str(b_total),"rule_status":"FORBIDDEN_B",
+                    "rule_reason":"仅 Pingbo 小分 + EB 大分方向满足阈值，但规则禁止投注 EB 大分"})
     return {"generated_at_utc":datetime.now(timezone.utc).isoformat(),
       "rule":{"name":"EB_UNDER_ENTRY_TWO_WAY_CROSS_CHECK","entry_condition":"同一场正规 NBA；EB 全场小分盘口 >= Pingbo 全场大分盘口",
        "cross_checks":["1/Pingbo_Over + 1/EB_Under < 1.0052","1/Pingbo_Under + 1/EB_Over < 1.0052"],
        "both_pass":"ANOMALY_BOTH_DIRECTIONS","neither_pass":"NO_MATCH"},
       "summary":{"eb_under_rows":len(eb_rows),"candidate_a":sum(x["rule_status"]=="CANDIDATE_A" for x in out),
-       "candidate_b":sum(x["rule_status"]=="CANDIDATE_B" for x in out),
+       "candidate_b":0,
+       "forbidden_b":sum(x["rule_status"]=="FORBIDDEN_B" for x in out),
        "anomalies":sum(x["rule_status"]=="ANOMALY_BOTH_DIRECTIONS" for x in out),
        "no_match":sum(x["rule_status"]=="NO_MATCH" for x in out),
-       "unmatched":sum(x["rule_status"] not in ("CANDIDATE_A","CANDIDATE_B","ANOMALY_BOTH_DIRECTIONS","NO_MATCH") for x in out)},
+       "unmatched":sum(x["rule_status"] not in ("CANDIDATE_A","FORBIDDEN_B","ANOMALY_BOTH_DIRECTIONS") for x in out)},
       "results":out,"safety":"只读校验，不含投注、订单、钱包或资金接口"}
 
 def markdown(r):
@@ -266,7 +268,7 @@ def markdown(r):
         lines.append(f"| {x.get('home_team')} vs {x.get('away_team')} | 小 {x.get('points')} / {x.get('odds_decimal')} | 大 {x.get('pingbo_points','—')} / {ca.get('pingbo_odds_decimal','—')} | {ca.get('reciprocal_sum','—')} | {cb.get('reciprocal_sum','—')} | {x.get('rule_status')} |")
     lines += ["","入口仅取 EB 全场小分；赛事双方球队按无序组合识别，开赛时间必须一致。滚球还要求双方提供相同的规范化节次与秒级进度字段；字段缺失或不一致时拒绝匹配。",
       "盘口入口条件：EB Under line >= Pingbo Over line。交叉赔率：A=1/Pingbo Over + 1/EB Under；B=1/Pingbo Under + 1/EB Over；各自严格小于 1.0052。",
-      "仅一个方向成立才生成对应 EB 赔率候选；两个方向同时成立标记异常；均不成立不产生候选。程序只读，不执行投注。"]
+      "仅 Pingbo 大分 + EB 小分成立时生成允许下注候选；Pingbo 小分 + EB 大分成立时仅记录禁止方向及 EB 大分赔率，不生成投注候选；两个方向同时成立标记异常；均不成立不输出匹配结果。程序只读，不执行投注。"]
     return "\\n".join(lines)
 def main():
     p=argparse.ArgumentParser()
