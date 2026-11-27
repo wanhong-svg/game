@@ -1,8 +1,11 @@
 import os
 import unittest
+import io
+from contextlib import redirect_stdout
 from unittest.mock import patch
 from op7_test_bet import (build_latest_market_request, build_limit_request, build_bet_payload,
-    validate_test_target, select_eb_full_game_total, validate_cross_odds_snapshot,\n    refresh_and_validate_cross_odds, parse_bet_result)
+    validate_test_target, select_eb_full_game_total, validate_cross_odds_snapshot,
+    refresh_and_validate_cross_odds, parse_bet_result, log_successful_bet_summary)
 
 SELECTION = {
     "event":{"mid":"m1","tid":"262","csid":"1","csna":"足球","tn":"欧洲联赛"},
@@ -100,6 +103,35 @@ class BetPayloadTests(unittest.TestCase):
         self.assertEqual(parsed["orders"][0]["orderNo"], "ORDER-1")
         self.assertEqual(parsed["bet_money_total_yuan"], "11")
         self.assertEqual(parsed["orders"][0]["bet_money_yuan"], "11")
+
+
+    def test_success_summary_groups_orders_and_sums_event_amounts(self):
+        results = [
+            {"event_id":"game-1","event_name":"主队 vs 客队","accepted_order_count":2,
+             "orders":[{},{}],"bet_money_total_yuan":"100.50"},
+            {"event_id":"game-1","event_name":"主队 vs 客队","accepted_order_count":1,
+             "orders":[{}],"bet_money_total_yuan":"50"},
+            {"event_id":"game-2","event_name":"另一场赛事","accepted_order_count":1,
+             "orders":[{}],"bet_money_total_yuan":"25.25"},
+        ]
+        output = io.StringIO()
+        with redirect_stdout(output):
+            log_successful_bet_summary(results)
+        text = output.getvalue()
+        self.assertIn("成功投注=3 单", text)
+        self.assertIn("赛事投注金额合计=150.50 元", text)
+        self.assertIn("成功投注=1 单", text)
+        self.assertIn("赛事投注金额合计=25.25 元", text)
+        self.assertIn("成功投注金额总计=175.75 元", text)
+
+    def test_success_summary_does_not_claim_total_when_amount_is_missing(self):
+        output = io.StringIO()
+        with redirect_stdout(output):
+            log_successful_bet_summary([{
+                "event_id":"game-1","event_name":"主队 vs 客队",
+                "accepted_order_count":1,"orders":[{"bet_money_yuan":None}],
+            }])
+        self.assertIn("金额不完整，无法准确汇总", output.getvalue())
 
     def test_bet_payload_rejects_nonpositive_stake(self):
         with self.assertRaises(ValueError):
