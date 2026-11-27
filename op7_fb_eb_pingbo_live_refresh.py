@@ -601,7 +601,7 @@ def main():
        eb_list_path='/yewu11/v1/m/noLiveMatchesPagePB'
       res=request_json(opctx,SITES['EB_ORIGIN']+eb_list_path,'POST',oh,body=eb_body,timeout_ms=a.timeout*1000,family='eb')
       eb_rows=eb_events(res)
-      eb_list=[x for x in eb_rows if mapper.is_nba_league(x.get('league'))]
+      eb_list=[x for x in eb_rows if mapper.is_nba_league(x.get('league')) or (mapper.nba_team_id(x.get('home')) is not None and mapper.nba_team_id(x.get('away')) is not None)]
       save_latest(out,'EB_events',eb_list); clocks['eb_list']=time.monotonic()
       print(f'[{now()}] EB赛事列表刷新：{len(eb_list)}场（接口={eb_list_path}，解析={len(eb_rows)}，NBA过滤后={len(eb_list)}）')
      except Exception as e:
