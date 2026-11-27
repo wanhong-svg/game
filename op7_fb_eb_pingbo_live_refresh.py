@@ -229,12 +229,12 @@ def _pingbo_rate_limit_info(response):
   try: payload=json.loads(response.text())
   except Exception: payload=None
  if not isinstance(payload,dict):
-  return None
+  return {'retry_after':30,'error_code':1015,'error_name':'rate_limited'} if response.status==429 else None
  code=payload.get('error_code')
  name=str(payload.get('error_name') or '').lower()
  category=str(payload.get('error_category') or '').lower()
  cloudflare=payload.get('cloudflare_error') is True
- if response.status==429 or code==1015 or name=='rate_limited' or (category=='rate_limit' and cloudflare):
+ if response.status==429 or str(code)=='1015' or name=='rate_limited' or (category=='rate_limit' and cloudflare):
   try: retry_after=max(1,int(payload.get('retry_after') or 30))
   except (TypeError,ValueError): retry_after=30
   return {'retry_after':retry_after,'error_code':code or 1015,'error_name':name or 'rate_limited'}
