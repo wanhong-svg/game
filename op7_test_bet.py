@@ -149,11 +149,12 @@ def select_eb_full_game_total(event, line, side, *, match_type, place_num,
     for market in event.get("hps") or []:
         if not isinstance(market, dict) or str(market.get("hpid")) != "38":
             continue
-        # Both ordinary and additional full-game totals use hpid=38.
-        # Resolve only the ordinary market using its confirmed name and topKey.
+        # Both confirmed EB full-game total markets are selectable.
         market_name = str(market.get("hpn") or "").strip()
         top_key = str(market.get("topKey") or market.get("hpid") or "")
-        if market_name != "全场大小" or top_key != "38":
+        is_standard = market_name == "全场大小" and top_key == "38"
+        is_additional = market_name == "全场大小-附加盘" and top_key == "38-1"
+        if not (is_standard or is_additional):
             continue
         for group in market.get("hl") or []:
             if not isinstance(group, dict):
@@ -168,7 +169,7 @@ def select_eb_full_game_total(event, line, side, *, match_type, place_num,
                 if isinstance(option, dict) and str(option.get("ot", "")).lower() == side.lower():
                     matches.append((market, group, option))
     if len(matches) != 1:
-        raise ValueError(f"EB full-game totals mapping is ambiguous: {len(matches)} matching {side} options")
+        raise ValueError(f"EB full-game totals mapping is ambiguous: {len(matches)} matching {side} options across ordinary and additional markets; pass an explicit market selector or line unique to the desired market")
     market, group, option = matches[0]
     required = {
         "event.mid": event.get("mid"), "event.tid": event.get("tid"),
@@ -830,6 +831,8 @@ def auto_run_once(browser_session, stake, timeout, output_path, candidates=None)
         for candidate in event_candidates:
             group_key = (
                 str(candidate["market"].get("hpid")),
+                str(candidate["market"].get("topKey") or candidate["market"].get("hpid")),
+                str(candidate["market"].get("hpn") or ""),
                 str(candidate["group"].get("hid")),
                 str(candidate["group"].get("hv")),
             )
@@ -839,7 +842,7 @@ def auto_run_once(browser_session, stake, timeout, output_path, candidates=None)
             if _successful_bet_counts().get(event_id, 0) >= MAX_SUCCESSFUL_BETS_PER_EVENT:
                 browser_session.set_ignored_event_ids(set(ignored_event_ids) | {event_id})
                 break
-            line = group_key[2]
+            line = group_key[4]
             event = probe["event"]
             eb_home = str(event.get("mhn") or event.get("home") or "").strip()
             eb_away = str(event.get("man") or event.get("away") or "").strip()
@@ -869,7 +872,9 @@ def auto_run_once(browser_session, stake, timeout, output_path, candidates=None)
                 first_candidate = next((
                     item for item in event_candidates
                     if str(item["market"].get("hpid")) == group_key[0]
-                    and str(item["group"].get("hid")) == group_key[1]
+                    and str(item["market"].get("topKey") or item["market"].get("hpid")) == group_key[1]
+                    and str(item["market"].get("hpn") or "") == group_key[2]
+                    and str(item["group"].get("hid")) == group_key[3]
                     and str(item["option"].get("ot") or "").lower() == "under"
                 ), None)
                 if first_candidate is None:
@@ -888,7 +893,9 @@ def auto_run_once(browser_session, stake, timeout, output_path, candidates=None)
                 candidate = next((
                     item for item in event_candidates
                     if str(item["market"].get("hpid")) == group_key[0]
-                    and str(item["group"].get("hid")) == group_key[1]
+                    and str(item["market"].get("topKey") or item["market"].get("hpid")) == group_key[1]
+                    and str(item["market"].get("hpn") or "") == group_key[2]
+                    and str(item["group"].get("hid")) == group_key[3]
                     and str(item["option"].get("ot") or "").lower() == "under"
                 ), None)
                 if candidate is None:
