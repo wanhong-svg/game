@@ -269,6 +269,17 @@ def match_reversed_totals(eb_rows: list[dict[str, Any]],
     return matches
 
 
+def _deep_merge(base: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
+    """Merge a partial event update without dropping untouched nested market fields."""
+    merged = dict(base) if isinstance(base, dict) else {}
+    for key, value in patch.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _deep_merge(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
 def extract_moneyline(event: dict[str, Any]) -> dict[str, Any] | list[Any] | None:
     """Preserve moneyLine and normalize only explicitly recognizable side/odds fields."""
     source = event.get("moneyLine")
@@ -300,7 +311,7 @@ def extract_moneyline(event: dict[str, Any]) -> dict[str, Any] | list[Any] | Non
                     raw_odds = odds_value(value)
                     if raw_odds is not None:
                         selections.append({"side": side, "raw_odds": raw_odds,
-                                           "decimal_odds": american_to_decimal(raw_odds),
+                                           
                                            "source_path": f"{path}.{key}".strip(".")})
                 elif isinstance(value, (dict, list)):
                     walk(value, f"{path}.{key}".strip("."))
@@ -461,6 +472,37 @@ class PingboClient:
                     event_id = str(event["id"])
                     incoming[event_id] = {"event": event, "league": league}
 
+        update_payload = data.get("update")
+        update_records = 0
+
+        def apply_update(node: Any) -> None:
+            nonlocal update_records
+            if isinstance(node, dict):
+                event_id_value = node.get("eventId") or node.get("id")
+                patch = node.get("normal") if isinstance(node.get("normal"), dict) else node
+                if event_id_value is not None and any(
+                        key in patch for key in ("periods", "participants", "moneyLine", "moneyline", "status", "time")):
+                    event_id = str(event_id_value)
+                    cached = self._event_cache.get(event_id) or incoming.get(event_id)
+                    if cached:
+                        merged_event = _deep_merge(cached.get("event", {}), patch)
+                        incoming[event_id] = {"event": merged_event, "league": cached.get("league", {
+                            "id": NBA_LEAGUE_ID, "sportId": SPORT_ID_BASKETBALL, "name": "NBA"})}
+                        update_records += 1
+                    elif isinstance(patch.get("participants"), list):
+                        incoming[event_id] = {"event": patch, "league": {
+                            "id": NBA_LEAGUE_ID, "sportId": SPORT_ID_BASKETBALL, "name": "NBA"}}
+                        update_records += 1
+                for child in node.values():
+                    if isinstance(child, (dict, list)):
+                        apply_update(child)
+            elif isinstance(node, list):
+                for child in node:
+                    apply_update(child)
+
+        if update_payload not in (None, {}, []):
+            apply_update(update_payload)
+
         refresh_all = data.get("refreshAll")
         if refresh_all is True:
             self._event_cache = incoming
@@ -479,6 +521,7 @@ class PingboClient:
         _trace({"kind": "nba_list_cache_summary", "request_version": request_version,
                 "response_version": self.list_version, "refreshAll": refresh_all,
                 "cache_action": cache_action, "incoming_event_count": len(incoming),
+                "update_record_count": update_records,
                 "cached_event_count": len(events)})
         return events, data
 
