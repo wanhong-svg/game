@@ -258,7 +258,7 @@ def run_validation(eb_rows,pb,min_edge=None):
 def markdown(r):
     lines=["# EB Under 入口 × Pingbo NBA 双向交叉赔率校验","",
       f"时间：{r['generated_at_utc']}","",
-      f"候选A {r['summary']['candidate_a']} | 候选B {r['summary']['candidate_b']} | 双向异常 {r['summary']['anomalies']} | 无匹配 {r['summary']['no_match']} | 未确认赛事/进程 {r['summary']['unmatched']}","",
+      f"允许候选A {r['summary']['candidate_a']} | 禁止方向B {r['summary']['forbidden_b']} | 双向异常 {r['summary']['anomalies']} | 无匹配 {r['summary']['no_match']} | 未确认赛事/进程 {r['summary']['unmatched']}","",
       "| EB赛事 | EB小分线/赔率 | Pingbo大分线/赔率 | A倒数和 | B倒数和 | 结果 |",
       "|---|---:|---:|---:|---:|---|"]
     for x in r["results"]:
