@@ -28,10 +28,11 @@
       "bet_paths": []
     },
     "eb": {
-      "base_url": "https://api.dbsportxxx278gwf4.com",
+      "base_url": "https://cgweb.op7uat.com",
       "hosts": [
         "api.dbsportxxx278gwf4.com",
-        "api.r4bud5u7.com"
+        "api.r4bud5u7.com",
+        "cgweb.op7uat.com"
       ],
       "read_paths": [
         "/yewu11/pub/v1/m/menu/initPB",
@@ -52,7 +53,7 @@
         "/yewu13/v1/betOrder/client/queryMarketMaxMinBetMoney",
         "/yewu13/v1/betOrder/client/bet"
       ],
-      "nba_read_base_url": "https://api.r4bud5u7.com"
+      "nba_read_base_url": "https://cgweb.op7uat.com"
     },
     "common": {
       "base_url": "https://api.live336.com",
