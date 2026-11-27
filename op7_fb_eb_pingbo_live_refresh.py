@@ -273,6 +273,58 @@ def _request_business_params(request):
    params['body']=urllib.parse.parse_qs(raw,keep_blank_values=True) or raw
  return _analysis_redact(params)
 
+def _pingbo_cache_page_feed(path, decoded, browser_events, http_status):
+ """Apply full snapshots and incremental responses without erasing a valid snapshot.
+
+ refreshAll=True is authoritative and replaces the path snapshot. For
+ refreshAll=False, parsed event rows are merged by event_id; an empty delta
+ preserves the previous snapshot and does not make stale data look fresh.
+ """
+ root=decoded.get('data') if isinstance(decoded,dict) and isinstance(decoded.get('data'),dict) else decoded
+ refresh_all=root.get('refreshAll') if isinstance(root,dict) else None
+ leagues=root.get('leagues') if isinstance(root,dict) else None
+ updates=root.get('update') if isinstance(root,dict) else None
+ league_count=len(leagues) if isinstance(leagues,list) else 0
+ update_count=len(updates) if isinstance(updates,list) else (len(updates) if isinstance(updates,dict) else 0)
+ previous=PINGBO_BROWSER_EVENT_FEEDS.get(path)
+ captured=now()
+ if refresh_all is True:
+  action='replace_full_snapshot'
+  events=list(browser_events)
+  PINGBO_BROWSER_EVENT_FEEDS[path]={
+   'events':events,'snapshot_captured_at':captured,
+   'last_response_at':captured,'http_status':http_status
+  }
+ elif browser_events:
+  action='merge_incremental_events'
+  merged={str(e.get('event_id')):e for e in (previous or {}).get('events',[])
+          if e.get('event_id') is not None}
+  for event in browser_events:
+   if event.get('event_id') is not None:
+    merged[str(event['event_id'])]=event
+  events=list(merged.values())
+  PINGBO_BROWSER_EVENT_FEEDS[path]={
+   'events':events,'snapshot_captured_at':captured,
+   'last_response_at':captured,'http_status':http_status
+  }
+ elif previous:
+  action='preserve_empty_delta'
+  events=previous.get('events',[])
+  previous['last_response_at']=captured
+  previous['last_http_status']=http_status
+ else:
+  action='no_snapshot_yet'
+  events=[]
+ _analysis_append({'kind':'browser_event_parse_summary','path':path,
+  'http_status':http_status,'refreshAll':refresh_all,
+  'version':root.get('version') if isinstance(root,dict) else None,
+  'league_count':league_count,'update_count':update_count,
+  'parsed_event_count':len(browser_events),'cache_action':action,
+  'cached_event_count':len(events),
+  'snapshot_captured_at':PINGBO_BROWSER_EVENT_FEEDS.get(path,{}).get('snapshot_captured_at')})
+ return action,events
+
+
 def _pingbo_page_response(response, page):
  try:
   parsed=urllib.parse.urlsplit(response.url)
@@ -282,18 +334,12 @@ def _pingbo_page_response(response, page):
   except Exception:
    try: payload=response.text()
    except Exception as exc: payload={'body_read_error':str(exc)}
-  # Treat the page's actual mobile odds response as a first-class event source.
-  # The league/event schema is parsed by the same strict NBA mapper as other feeds.
+  # The mobile API uses full snapshots (refreshAll=True) and incremental
+  # no-change/update responses (refreshAll=False). Never replace a snapshot
+  # with an empty delta.
   decoded=unwrap(payload)
   browser_events=mapper.extract_pingbo_events(decoded)
-  # Cache each endpoint independently. An empty odds-live response must not
-  # erase a non-empty odds-today response (or vice versa).
-  PINGBO_BROWSER_EVENT_FEEDS[parsed.path]={
-   'events':browser_events,'captured_at':now(),'http_status':response.status
-  }
-  _analysis_append({'kind':'browser_event_parse_summary','path':parsed.path,
-   'http_status':response.status,'league_count':len(decoded.get('leagues',[])) if isinstance(decoded,dict) and isinstance(decoded.get('leagues'),list) else None,
-   'parsed_event_count':len(browser_events)})
+  _pingbo_cache_page_feed(parsed.path,decoded,browser_events,response.status)
   ui_text=''
   try: ui_text=page.locator('body').inner_text(timeout=1500)[:100000]
   except Exception: pass
@@ -633,7 +679,7 @@ def main():
       max_browser_age=max(120,a.pingbo_interval*4)
       for feed_path,feed in list(PINGBO_BROWSER_EVENT_FEEDS.items()):
        try:
-        feed_age=(datetime.now(timezone.utc)-datetime.fromisoformat(feed['captured_at'].replace('Z','+00:00'))).total_seconds()
+        feed_age=(datetime.now(timezone.utc)-datetime.fromisoformat(feed['snapshot_captured_at'].replace('Z','+00:00'))).total_seconds()
        except Exception:
         feed_age=None
        if feed_age is not None and 0<=feed_age<=max_browser_age:
