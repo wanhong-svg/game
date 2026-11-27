@@ -526,7 +526,7 @@ def main():
  profiles=Path(a.profiles_dir); (profiles/'op7').mkdir(parents=True,exist_ok=True); (profiles/'pingbo').mkdir(parents=True,exist_ok=True)
  out=Path(a.out); oh=headers_env('OP7_READONLY_HEADERS_JSON'); ph=headers_env('PINGBO_READONLY_HEADERS_JSON')
  global PINGBO_ANALYSIS_DIR
- PINGBO_ANALYSIS_DIR=out/'pingbo_api_analysis'
+ PINGBO_ANALYSIS_DIR=Path(os.environ.get('PINGBO_API_ANALYSIS_DIR',str(out/'pingbo_api_analysis')))
  PINGBO_ANALYSIS_DIR.mkdir(parents=True,exist_ok=True)
  print(f'[Pingbo分析] 页面自动请求、脚本请求/响应及页面可见变化将记录到：{PINGBO_ANALYSIS_DIR.resolve()}')
  with sync_playwright() as p:
