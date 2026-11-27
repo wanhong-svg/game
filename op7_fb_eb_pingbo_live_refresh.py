@@ -530,7 +530,7 @@ def main():
  global PINGBO_ANALYSIS_DIR,PINGBO_ANALYSIS_FILE
  PINGBO_ANALYSIS_DIR=Path(os.environ.get('PINGBO_API_ANALYSIS_DIR',str(out/'pingbo_api_analysis')))
  PINGBO_ANALYSIS_DIR.mkdir(parents=True,exist_ok=True)
- stamp=datetime.now().strftime('%Y%m%d_%H%M%S')
+ stamp=datetime.now().strftime('%Y%m%d_%H%M%S')+f'_{time.time_ns()%1_000_000_000:09d}'
  default_file=PINGBO_ANALYSIS_DIR/f'pingbo_api_trace_{stamp}.jsonl'
  PINGBO_ANALYSIS_FILE=Path(os.environ.get('PINGBO_API_ANALYSIS_FILE',str(default_file)))
  PINGBO_ANALYSIS_FILE.parent.mkdir(parents=True,exist_ok=True)
