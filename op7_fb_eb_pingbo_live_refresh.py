@@ -386,6 +386,69 @@ def _pingbo_rate_limit_info(response):
  return None
 
 
+# Credential-free diagnostics for the latest API request per family/path.
+LAST_API_DIAGNOSTICS={}
+
+def _diag_shape(payload):
+ d=data_of(payload)
+ out={'response_type':type(payload).__name__,'response_keys':sorted(payload.keys())[:60] if isinstance(payload,dict) else [],
+      'data_type':type(d).__name__,'data_keys':sorted(d.keys())[:60] if isinstance(d,dict) else []}
+ rows=None; container=None
+ if isinstance(d,list): rows=d; container='data'
+ elif isinstance(d,dict):
+  for key in ('records','list','rows'):
+   if isinstance(d.get(key),list): rows=d[key]; container=f'data.{key}'; break
+  if rows is None and isinstance(d.get('data'),(dict,list)):
+   nested=d['data']
+   if isinstance(nested,list): rows=nested; container='data.data'
+   elif isinstance(nested,dict):
+    for key in ('records','list','rows'):
+     if isinstance(nested.get(key),list): rows=nested[key]; container=f'data.data.{key}'; break
+ out['candidate_container']=container
+ out['candidate_row_count']=len(rows) if isinstance(rows,list) else None
+ sample=next((x for x in rows or [] if isinstance(x,dict)),None) if isinstance(rows,list) else None
+ if isinstance(sample,dict):
+  out['sample_row_keys']=sorted(sample.keys())[:80]
+  fields=('id','mid','nm','mhn','man','homeName','awayName','league','leagueName','tn','tnjc','csna','sportName')
+  out['sample_event_fields']={k:sample.get(k) for k in fields if k in sample}
+ return out
+
+def _fb_parse_diagnostics(payload, parsed):
+ d=data_of(payload); rows=d.get('records',[]) if isinstance(d,dict) else []
+ counts={'candidate_rows':len(rows) if isinstance(rows,list) else 0,'dict_rows':0,'nba_league_rows':0,
+         'matchup_format_rows':0,'parsed_events':len(parsed)}
+ for x in rows if isinstance(rows,list) else []:
+  if not isinstance(x,dict): continue
+  counts['dict_rows']+=1
+  lg=x.get('lg') if isinstance(x.get('lg'),dict) else {}
+  league=mapper.first(lg,'na','nm','name') or x.get('leagueName') or x.get('league')
+  if not mapper.is_nba_league(league): continue
+  counts['nba_league_rows']+=1
+  nm=str(x.get('nm') or '')
+  parts=__import__('re').split(r'\\s+vs\\.?\\s+',nm,maxsplit=1,flags=__import__('re').I)
+  if len(parts)==2: counts['matchup_format_rows']+=1
+ return counts
+
+def _eb_parse_diagnostics(payload, parsed, nba_rows):
+ d=data_of(payload); path=[]
+ for _ in range(3):
+  if isinstance(d,list): path.append('list'); break
+  if not isinstance(d,dict): break
+  for key in ('records','list','rows'):
+   if isinstance(d.get(key),list): d=d[key]; path.append(key); break
+  else:
+   if isinstance(d.get('data'),(dict,list)): d=d['data']; path.append('data'); continue
+   break
+  break
+ rows=d if isinstance(d,list) else []
+ valid=0
+ for x in rows:
+  if isinstance(x,dict) and (x.get('mid') or x.get('id')) and (x.get('mhn') or x.get('homeName')) and (x.get('man') or x.get('awayName')):
+   valid+=1
+ return {'container_path':'/'.join(path) or 'unrecognized','candidate_rows':len(rows),
+         'dict_rows':sum(isinstance(x,dict) for x in rows),'event_shape_rows':valid,
+         'parsed_events':len(parsed),'nba_filtered_events':len(nba_rows)}
+
 def request_json(ctx,url,method,headers,params=None,body=None,timeout_ms=15000,family=None):
  p=urllib.parse.urlsplit(url)
  if p.scheme!='https' or p.netloc not in ALLOW or p.path not in ALLOW[p.netloc] or method not in ('GET','POST'):
@@ -441,6 +504,15 @@ def request_json(ctx,url,method,headers,params=None,body=None,timeout_ms=15000,f
    continue
   if not r.ok: raise RuntimeError(f'HTTP {r.status} from {p.netloc}{p.path}')
   payload=unwrap(r.json())
+  safe_body_keys=sorted(body.keys()) if isinstance(body,dict) else []
+  safe_query_keys=sorted(urllib.parse.parse_qs(urllib.parse.urlsplit(url).query,keep_blank_values=True).keys())
+  LAST_API_DIAGNOSTICS[(family,p.path)]={
+   'recorded_at_utc':now(),'family':family,'path':p.path,'http_status':r.status,
+   'method':method,'template_used':bool(template),
+   'template_capture_age_seconds':round(time.monotonic()-template['captured_at_monotonic'],2) if template else None,
+   'request_query_keys':safe_query_keys,'request_body_keys':safe_body_keys,
+   **_diag_shape(payload)
+  }
   if family=='pingbo' and p.path in PINGBO_ODDS_PATHS:
    _analysis_append({'kind':'script_response','source':'script_assembled','method':method,
     'url_without_query':f'{p.scheme}://{p.netloc}{p.path}','path':p.path,'http_status':r.status,
@@ -634,8 +706,11 @@ def main():
     if tick-clocks['fb_list']>=a.fb_list_interval:
      try:
       res=request_json(opctx,SITES['FB_ORIGIN']+'/v1/match/getList','POST',oh,body=fb_body,timeout_ms=a.timeout*1000,family='fb')
-      fb_list=fb_events(res); save_latest(out,'FB_events',fb_list); clocks['fb_list']=time.monotonic()
-      print(f'[{now()}] FB赛事列表刷新：{len(fb_list)}场')
+      fb_list=fb_events(res)
+      fb_diag={**LAST_API_DIAGNOSTICS.get(('fb','/v1/match/getList'),{}),
+               'parser':_fb_parse_diagnostics(res,fb_list)}
+      save_latest(out,'FB_events',fb_list,details=fb_diag); clocks['fb_list']=time.monotonic()
+      print(f'[{now()}] FB赛事列表刷新：{len(fb_list)}场（HTTP={fb_diag.get("http_status")}，候选={fb_diag["parser"]["candidate_rows"]}，NBA联赛={fb_diag["parser"]["nba_league_rows"]}，匹配格式={fb_diag["parser"]["matchup_format_rows"]}）')
      except Exception as e:
       save_failure(out,'FB_events',e); print(f'FB列表刷新失败：{type(e).__name__}: {e}',file=sys.stderr)
       clocks['fb_list']=time.monotonic()
@@ -658,8 +733,12 @@ def main():
       res=request_json(opctx,SITES['EB_ORIGIN']+eb_list_path,'POST',oh,body=eb_body,timeout_ms=a.timeout*1000,family='eb')
       eb_rows=eb_events(res)
       eb_list=[x for x in eb_rows if mapper.is_nba_league(x.get('league')) or (mapper.nba_team_id(x.get('home')) is not None and mapper.nba_team_id(x.get('away')) is not None)]
-      save_latest(out,'EB_events',eb_list); clocks['eb_list']=time.monotonic()
-      print(f'[{now()}] EB赛事列表刷新：{len(eb_list)}场（接口={eb_list_path}，解析={len(eb_rows)}，NBA过滤后={len(eb_list)}）')
+      eb_diag={**LAST_API_DIAGNOSTICS.get(('eb',eb_list_path),{}),
+               'parser':_eb_parse_diagnostics(res,eb_rows,eb_list),
+               'selected_list_endpoint':eb_list_path,
+               'available_captured_list_endpoints':eb_list_candidates}
+      save_latest(out,'EB_events',eb_list,details=eb_diag); clocks['eb_list']=time.monotonic()
+      print(f'[{now()}] EB赛事列表刷新：{len(eb_list)}场（接口={eb_list_path}，HTTP={eb_diag.get("http_status")}，候选={eb_diag["parser"]["candidate_rows"]}，解析={len(eb_rows)}，NBA过滤后={len(eb_list)}）')
      except Exception as e:
       save_failure(out,'EB_events',e); print(f'EB列表刷新失败：{type(e).__name__}: {e}',file=sys.stderr)
       clocks['eb_list']=time.monotonic()
@@ -703,7 +782,14 @@ def main():
       normalized=[{k:v for k,v in x.items() if not k.startswith('_')} for x in pb_list]
       pb_markets=[r for x in pb_list for r in mapper.flatten_pingbo_markets(x)]
       pb_markets=update_market_cache(market_cache['PINGBO'],'PINGBO',pb_markets,[x['event_id'] for x in pb_list],fetched_at)
-      save_latest(out,'Pingbo_events',{'events':normalized,'markets':pb_markets}); clocks['pb']=time.monotonic()
+      pb_diag={**LAST_API_DIAGNOSTICS.get(('pingbo','/sports-service/sv/compact/events'),{}),
+               'compact_events_parsed':len(compact_rows),'selected_source':pb_source,
+               'selected_source_event_count':len(pb_rows),'nba_filtered_event_count':len(pb_list),
+               'browser_feed_snapshots':{k:{'cached_event_count':len(v.get('events',[])),
+                 'snapshot_captured_at':v.get('snapshot_captured_at'),'last_response_at':v.get('last_response_at'),
+                 'http_status':v.get('http_status'),'last_http_status':v.get('last_http_status')}
+                 for k,v in PINGBO_BROWSER_EVENT_FEEDS.items()}}
+      save_latest(out,'Pingbo_events',{'events':normalized,'markets':pb_markets},details=pb_diag); clocks['pb']=time.monotonic()
       print(f'[{now()}] Pingbo赛事+内嵌盘口刷新：{len(pb_list)}场 / {len(pb_markets)}条当前盘口记录（数据源={pb_source}，接口解析={len(pb_rows)}，NBA过滤后={len(pb_list)}）')
      except Exception as e:
       save_failure(out,'Pingbo_events',e); print(f'Pingbo刷新失败：{type(e).__name__}: {e}',file=sys.stderr)
