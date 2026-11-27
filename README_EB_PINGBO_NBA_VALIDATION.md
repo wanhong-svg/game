@@ -25,8 +25,10 @@ python eb_pingbo_nba_validator.py --watch --interval 20
 
 ## 匹配规则
 
-- EB 只读取普通全场大小玩法：`play_id_hpid=38`、`market_name=全场大小`、`market_top_key=38` 中的 Under 选项。
-- `全场大小-附加盘` 同样使用 `hpid=38`，但 `topKey=38-1`；该玩法保留在原始盘口快照中，不进入本校验流程。
+- EB 普通全场大小与全场大小-附加盘都进入校验和候选池；两者均使用 `hpid=38`，必须结合 `hpn/topKey` 区分。
+- 普通全场大小：`market_name=全场大小`、`market_top_key=38`。
+- 全场大小-附加盘：`market_name=全场大小-附加盘`、`market_top_key=38-1`。
+- 两种玩法的每条 `hl` 盘口线及其 `hid/hv/ol` 都独立保留，不能互相覆盖。
 - Pingbo 只读取 NBA 赛事详情的全场盘口 `periods["0"].overUnder`。
 - 赛事以标准化后的主客队顺序匹配；不确定时不做反向猜测。
 - EB Under 213.5 对应 Pingbo Over 213.5；盘口线必须完全一致。
