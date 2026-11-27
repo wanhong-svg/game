@@ -51,7 +51,7 @@ class BetPayloadTests(unittest.TestCase):
     def test_selects_current_nba_option_from_raw_event_tree(self):
         event = {
             "mid":"nba-1", "tid":"132", "csid":"2", "csna":"篮球", "tn":"NBA", "tnjc":"NBA",
-            "hps":[{"hpid":"38","hpn":"全场大小","hl":[{"hid":"market-1","hv":"213.5",
+            "hps":[{"hpid":"38","topKey":"38","hpn":"全场大小","hl":[{"hid":"market-1","hv":"213.5",
                 "ol":[{"oid":"under-1","ot":"Under","ov":194000,"otv":"小 213.5"},
                       {"oid":"over-1","ot":"Over","ov":194000,"otv":"大 213.5"}]}]}]
         }
@@ -60,6 +60,24 @@ class BetPayloadTests(unittest.TestCase):
             market_type_finally="EU")
         self.assertEqual(selection["option"]["oid"], "under-1")
         self.assertEqual(selection["market"]["hpid"], "38")
+
+    def test_selector_excludes_additional_total_even_when_line_and_side_match(self):
+        event = {
+            "mid":"nba-2", "tid":"132", "csid":"2", "csna":"篮球", "tn":"NBA", "tnjc":"NBA",
+            "hps":[
+                {"hpid":"38","topKey":"38-1","hpn":"全场大小-附加盘","hl":[
+                    {"hid":"additional-line","hv":"213.5",
+                     "ol":[{"oid":"additional-under","ot":"Under","ov":194000,"otv":"小 213.5"}]}]},
+                {"hpid":"38","topKey":"38","hpn":"全场大小","hl":[
+                    {"hid":"ordinary-line","hv":"213.5",
+                     "ol":[{"oid":"ordinary-under","ot":"Under","ov":195000,"otv":"小 213.5"}]}]},
+            ]
+        }
+        selection = select_eb_full_game_total(event, "213.5", "Under", match_type=1,
+            place_num=1, cuid="runtime-cuid", device_imei="runtime-device",
+            market_type_finally="EU")
+        self.assertEqual(selection["market"]["topKey"], "38")
+        self.assertEqual(selection["option"]["oid"], "ordinary-under")
 
     def test_cross_odds_selects_only_one_direction(self):
         result = validate_cross_odds_snapshot({
