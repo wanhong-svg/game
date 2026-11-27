@@ -36,6 +36,61 @@ READ_PATHS = {LIST_PATH, LIVE_PATH, EVENT_PATH, LEAGUES_PATH, SPORTS_PATH,
               MARKET_FILTERS_PATH, LEAGUE_EVENTS_PATH}
 
 
+
+ANALYSIS_DIR = Path(os.environ.get("PINGBO_API_ANALYSIS_DIR", str(Path("live_snapshots") / "pingbo_api_analysis")))
+ANALYSIS_FILE = ANALYSIS_DIR / "pingbo_api_trace.jsonl"
+SENSITIVE_KEYS = ("cookie", "token", "authorization", "password", "passwd", "secret", "session", "credential")
+
+def _redact(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(k): ("[REDACTED]" if any(x in str(k).lower() for x in SENSITIVE_KEYS) else _redact(v)) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_redact(x) for x in value]
+    return value
+
+def _trace(record: dict[str, Any]) -> None:
+    try:
+        ANALYSIS_DIR.mkdir(parents=True, exist_ok=True)
+        with ANALYSIS_FILE.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps({"recorded_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), **_redact(record)}, ensure_ascii=False, default=str) + "\\n")
+    except Exception as exc:
+        print(f"[Pingbo分析] trace write failed: {type(exc).__name__}: {exc}")
+
+def _latest_browser_params(path: str) -> dict[str, Any] | None:
+    if not ANALYSIS_FILE.exists():
+        return None
+    try:
+        for line in reversed(ANALYSIS_FILE.read_text(encoding="utf-8").splitlines()):
+            row = json.loads(line)
+            if row.get("kind") == "browser_auto_request" and row.get("path") == path:
+                return row.get("request_params")
+    except Exception:
+        return None
+    return None
+
+def _flatten_params(value: Any, prefix: str = "") -> dict[str, str]:
+    out: dict[str, str] = {}
+    if isinstance(value, dict):
+        for key, item in value.items():
+            out.update(_flatten_params(item, f"{prefix}.{key}" if prefix else str(key)))
+    elif isinstance(value, list):
+        out[prefix] = json.dumps(value, ensure_ascii=False, sort_keys=True)
+    else:
+        out[prefix] = str(value)
+    return out
+
+def _compare_page_params(path: str, script_params: dict[str, Any]) -> dict[str, Any]:
+    page_params = _latest_browser_params(path)
+    if page_params is None:
+        return {"browser_request_found": False, "note": "本地 trace 中尚无该接口的页面自动请求样本"}
+    page_flat, script_flat = _flatten_params(page_params), _flatten_params(script_params)
+    keys = sorted(set(page_flat) | set(script_flat))
+    return {"browser_request_found": True,
+            "same": page_flat == script_flat,
+            "only_in_browser": {k: page_flat[k] for k in keys if k in page_flat and k not in script_flat},
+            "only_in_script": {k: script_flat[k] for k in keys if k in script_flat and k not in page_flat},
+            "different_values": {k: {"browser": page_flat[k], "script": script_flat[k]} for k in keys if k in page_flat and k in script_flat and page_flat[k] != script_flat[k]}}
+
 class PingboApiError(RuntimeError):
     pass
 
@@ -235,17 +290,28 @@ class PingboClient:
         if path not in READ_PATHS:
             raise ValueError(f"Pingbo read endpoint not allow-listed: {path}")
         query = urllib.parse.urlencode({k: v for k, v in params.items() if v is not None})
-        req = urllib.request.Request(self.base_url + path + "?" + query,
-                                     headers=self.headers, method="GET")
+        request_url = self.base_url + path + "?" + query
+        req = urllib.request.Request(request_url, headers=self.headers, method="GET")
+        script_params = {"query": {k: [str(v)] for k, v in params.items() if v is not None}}
+        if path in {LIST_PATH, LIVE_PATH}:
+            _trace({"kind": "script_request", "source": "pingbo_nba_detail.PingboClient",
+                    "method": "GET", "url_without_query": self.base_url + path, "path": path,
+                    "request_params": script_params, "page_vs_script_parameter_diff": _compare_page_params(path, script_params)})
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as response:
                 raw = response.read()
+                status = response.status
         except urllib.error.HTTPError as exc:
             raise PingboApiError(f"Pingbo HTTP {exc.code} at {path}") from exc
         except urllib.error.URLError as exc:
             raise PingboApiError(f"Pingbo network error at {path}: {exc.reason}") from exc
         try:
-            return json.loads(raw.decode("utf-8"))
+            payload = json.loads(raw.decode("utf-8"))
+            if path in {LIST_PATH, LIVE_PATH}:
+                _trace({"kind": "script_response", "source": "pingbo_nba_detail.PingboClient",
+                        "method": "GET", "url_without_query": self.base_url + path, "path": path,
+                        "http_status": status, "response_data": payload})
+            return payload
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise PingboApiError(f"Pingbo invalid JSON at {path}") from exc
 
