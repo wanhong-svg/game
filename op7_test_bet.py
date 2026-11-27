@@ -131,7 +131,8 @@ def build_bet_payload(selection, stake, odds_value=None, latest_market=None):
 
 
 def select_eb_full_game_total(event, line, side, *, match_type, place_num,
-                              cuid, device_imei, market_type_finally):
+                              cuid, device_imei, market_type_finally,
+                              market_name=None, market_top_key=None):
     """Resolve a candidate against the current raw EB event tree; never reuse old IDs."""
     if str(event.get("csid")) != "2":
         raise ValueError("candidate event is not basketball (csid != 2)")
@@ -156,6 +157,10 @@ def select_eb_full_game_total(event, line, side, *, match_type, place_num,
         is_additional = market_name == "全场大小-附加盘" and top_key == "38-1"
         if not (is_standard or is_additional):
             continue
+        if market_name is not None and market_name != market.get("hpn"):
+            continue
+        if market_top_key is not None and str(market_top_key) != top_key:
+            continue
         for group in market.get("hl") or []:
             if not isinstance(group, dict):
                 continue
@@ -169,7 +174,7 @@ def select_eb_full_game_total(event, line, side, *, match_type, place_num,
                 if isinstance(option, dict) and str(option.get("ot", "")).lower() == side.lower():
                     matches.append((market, group, option))
     if len(matches) != 1:
-        raise ValueError(f"EB full-game totals mapping is ambiguous: {len(matches)} matching {side} options across ordinary and additional markets; pass an explicit market selector or line unique to the desired market")
+        raise ValueError(f"EB full-game totals mapping is ambiguous: {len(matches)} matching {side} options; pass market_name and market_top_key to select one EB market")
     market, group, option = matches[0]
     required = {
         "event.mid": event.get("mid"), "event.tid": event.get("tid"),
