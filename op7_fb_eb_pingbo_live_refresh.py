@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 import op7_fb_eb_venue_mapper as mapper
+from pingbo_incremental_cache import PingboFeedCache
 
 ENDPOINTS=json.loads((Path(__file__).with_name('endpoints.json')).read_text(encoding='utf-8'))
 SITES={
@@ -252,6 +253,7 @@ PINGBO_PAGE_REQUEST_LAST={}
 # Keep the two browser feeds separate: odds-live may legitimately return
 # an empty leagues array while odds-today still contains the page's event list.
 PINGBO_BROWSER_EVENT_FEEDS={}
+PINGBO_MARKET_CACHE=PingboFeedCache()
 PINGBO_ANALYSIS_LOCK=threading.Lock()
 PINGBO_ODDS_PATHS=('/sports-service/sv/mobile/odds-live','/sports-service/sv/mobile/odds-today')
 
@@ -291,58 +293,45 @@ def _request_business_params(request):
  return _analysis_redact(params)
 
 def _pingbo_cache_page_feed(path, decoded, browser_events, http_status):
- """Apply full snapshots and incremental responses without erasing a valid snapshot.
+ """Apply source-scoped event/market snapshots and conservative deltas.
 
- refreshAll=True is authoritative and replaces the path snapshot. For
- refreshAll=False, parsed event rows are merged by event_id; an empty delta
- preserves the previous snapshot and does not make stale data look fresh.
+ Full snapshots replace only this endpoint's source. Non-empty deltas merge
+ recognized event_id rows; empty deltas update polling metadata only. Unknown
+ update schemas are retained in diagnostics and never interpreted as deletes.
  """
  root=decoded.get('data') if isinstance(decoded,dict) and isinstance(decoded.get('data'),dict) else decoded
  refresh_all=root.get('refreshAll') if isinstance(root,dict) else None
  leagues=root.get('leagues') if isinstance(root,dict) else None
  updates=root.get('update') if isinstance(root,dict) else None
- league_count=len(leagues) if isinstance(leagues,list) else 0
- update_count=len(updates) if isinstance(updates,list) else (len(updates) if isinstance(updates,dict) else 0)
- previous=PINGBO_BROWSER_EVENT_FEEDS.get(path)
+ update_count=len(updates) if isinstance(updates,(list,dict)) else 0
  captured=now()
- if refresh_all is True:
-  action='replace_full_snapshot'
-  events=list(browser_events)
-  PINGBO_BROWSER_EVENT_FEEDS[path]={
-   'events':events,'snapshot_captured_at':captured,
-   'last_response_at':captured,'http_status':http_status
+ result=PINGBO_MARKET_CACHE.apply(
+  source=path, refresh_all=refresh_all, version=root.get('version') if isinstance(root,dict) else None,
+  events=browser_events, http_status=http_status, response_at=captured, update_count=update_count)
+ events=[item.get('event') for item in result['events'].values()
+         if isinstance(item,dict) and isinstance(item.get('event'),dict)]
+ PINGBO_BROWSER_EVENT_FEEDS[path]={
+  'events':events, 'snapshot_captured_at':result.get('snapshot_at'),
+  'last_response_at':result.get('last_response_at'), 'http_status':http_status,
+  'version':result.get('version'), 'markets_by_event':{
+   eid:item.get('markets',{}) for eid,item in result['events'].items()
   }
- elif browser_events:
-  action='merge_incremental_events'
-  merged={str(e.get('event_id')):e for e in (previous or {}).get('events',[])
-          if e.get('event_id') is not None}
-  for event in browser_events:
-   if event.get('event_id') is not None:
-    merged[str(event['event_id'])]=event
-  events=list(merged.values())
-  PINGBO_BROWSER_EVENT_FEEDS[path]={
-   'events':events,'snapshot_captured_at':captured,
-   'last_response_at':captured,'http_status':http_status
-  }
- elif previous:
-  action='preserve_empty_delta'
-  events=previous.get('events',[])
-  previous['last_response_at']=captured
-  previous['last_http_status']=http_status
- else:
-  action='no_snapshot_yet'
-  events=[]
+ }
+ action=result['action']
  _analysis_append({'kind':'browser_event_parse_summary','path':path,
   'http_status':http_status,'refreshAll':refresh_all,
-  'version':root.get('version') if isinstance(root,dict) else None,
-  'league_count':league_count,'update_count':update_count,
-  'league_names':[str(x.get('name')) for x in leagues if isinstance(x,dict) and x.get('name')][:30] if isinstance(leagues,list) else [],
+  'version':result.get('version'),'league_count':len(leagues) if isinstance(leagues,list) else 0,
+  'update_count':update_count,'league_names':[str(x.get('name')) for x in leagues if isinstance(x,dict) and x.get('name')][:30] if isinstance(leagues,list) else [],
   'parsed_event_count':len(browser_events),
   'parsed_live_event_count':sum(1 for x in browser_events if x.get('live') is True),
   'parsed_market_row_count':sum(len(mapper.flatten_pingbo_markets(x)) for x in browser_events),
   'sample_event_ids':[str(x.get('event_id')) for x in browser_events[:20]],
   'cache_action':action,'cached_event_count':len(events),
-  'snapshot_captured_at':PINGBO_BROWSER_EVENT_FEEDS.get(path,{}).get('snapshot_captured_at')})
+  'snapshot_captured_at':result.get('snapshot_at'),
+  'last_response_at':result.get('last_response_at'),
+  'changed_market_count':len(result.get('changed_markets',[])),
+  'changed_markets':result.get('changed_markets',[])[:100],
+  'unknown_update_shape':bool(update_count and not browser_events)})
  return action,events
 
 

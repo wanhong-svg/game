@@ -349,45 +349,48 @@ def _pingbo_decimal_odds(value):
     return None
 
 def flatten_pingbo_markets(event):
-    """Flatten full-game totals from mobile periods['0'].overUnder."""
+    """Flatten Pingbo markets while retaining unavailable/offline rows and status."""
     raw_event=event.get('_raw_event') if isinstance(event,dict) else None
     if isinstance(raw_event,dict):
         normal=raw_event.get('normal') if isinstance(raw_event.get('normal'),dict) else raw_event
         periods=normal.get('periods') if isinstance(normal,dict) else None
-        period=periods.get('0') if isinstance(periods,dict) else None
-        over_under=period.get('overUnder') if isinstance(period,dict) else None
         rows=[]
-        if isinstance(over_under,dict): over_under=list(over_under.values())
-        for item in over_under if isinstance(over_under,list) else []:
-            if not isinstance(item,dict): continue
-            if item.get('offline') is True or item.get('unavailable') is True: continue
-            points=item.get('points')
-            over=_pingbo_decimal_odds(item.get('overOdds'))
-            under=_pingbo_decimal_odds(item.get('underOdds'))
-            for side,odds in (('over',over),('under',under)):
-                if odds is None or odds<=1: continue
-                rows.append({
-                    'venue':'PINGBO','event_id':str(event.get('event_id')),
-                    'market_key':'1','market_label':'全场大小',
-                    'side':side,'line':str(points) if points is not None else None,
-                    'decimal_odds':str(odds),'display_europe':trunc(odds,2),
-                    'selection_id':str(item.get('lineId')) if item.get('lineId') is not None else None,
-                    'line_id':item.get('lineId'),'is_alt':bool(item.get('isAlt',False)),
-                    'offline':item.get('offline',False),'unavailable':item.get('unavailable',False),
-                    'raw_american_odds':item.get('overOdds' if side=='over' else 'underOdds'),
-                    'observed_at_utc':event.get('observed_at_utc')
-                })
+        if isinstance(periods,dict):
+            for period_key, period in periods.items():
+                if not isinstance(period,dict): continue
+                over_under=period.get('overUnder')
+                if isinstance(over_under,dict): over_under=list(over_under.values())
+                for item in over_under if isinstance(over_under,list) else []:
+                    if not isinstance(item,dict): continue
+                    points=item.get('points')
+                    for side,raw_odds in (('over',item.get('overOdds')),('under',item.get('underOdds'))):
+                        odds=_pingbo_decimal_odds(raw_odds)
+                        rows.append({
+                            'venue':'PINGBO','event_id':str(event.get('event_id')),
+                            'market_type':'overUnder','period':str(period_key),
+                            'market_key':str(period_key),'market_label':'全场大小' if str(period_key)=='0' else f'分段大小({period_key})',
+                            'side':side,'line':str(points) if points is not None else None,
+                            'decimal_odds':str(odds) if odds is not None else None,
+                            'display_europe':trunc(odds,2) if odds is not None else None,
+                            'selection_id':str(item.get('lineId')) if item.get('lineId') is not None else None,
+                            'line_id':item.get('lineId'),'is_alt':bool(item.get('isAlt',False)),
+                            'offline':item.get('offline',False),'unavailable':item.get('unavailable',False),
+                            'is_usable':not bool(item.get('offline') or item.get('unavailable')) and odds is not None and odds>1,
+                            'raw_american_odds':raw_odds,
+                            'observed_at_utc':event.get('observed_at_utc')
+                        })
         return rows
 
-    # Legacy compact/events tuple schema.
+    # Legacy compact/events tuple schema remains unchanged.
     rows=[]; markets=event.get('_raw_markets',{})
     for r in markets.get('0',[]) if isinstance(markets,dict) else []:
         if not isinstance(r,list) or len(r)<5: continue
         for side,idx,line_idx,odds_idx in [('home',0,2,3),('away',1,2,4)]:
             odds=dec(r[odds_idx])
             if odds is None or odds<=1: continue
-            rows.append({'venue':'PINGBO','event_id':event['event_id'],'market_key':'0','market_label':'legacy handicap',
-              'side':side,'line':r[line_idx],'signed_line':r[idx],'decimal_odds':str(odds),'display_europe':trunc(odds,2),
+            rows.append({'venue':'PINGBO','event_id':event['event_id'],'market_key':'0',
+              'market_label':'legacy handicap','side':side,'line':r[line_idx],
+              'signed_line':r[idx],'decimal_odds':str(odds),'display_europe':trunc(odds,2),
               'selection_id':r[7] if len(r)>7 else None,'raw_status_fields':r[5:7],
               'observed_at_utc':event.get('observed_at_utc')})
     for r in markets.get('1',[]) if isinstance(markets,dict) else []:
@@ -395,10 +398,11 @@ def flatten_pingbo_markets(event):
         line=r[0]; total=dec(r[1]); over=dec(r[2]); under=dec(r[3])
         for side,odds in [('over',over),('under',under)]:
             if odds is None or odds<=1: continue
-            rows.append({'venue':'PINGBO','event_id':event['event_id'],'market_key':'1','market_label':'legacy totals',
-              'side':side,'line':line,'line_numeric_source_index_1':str(total) if total is not None else None,
-              'decimal_odds':str(odds),'display_europe':trunc(odds,2),'selection_id':r[4] if len(r)>4 else None,
-              'observed_at_utc':event.get('observed_at_utc')})
+            rows.append({'venue':'PINGBO','event_id':event['event_id'],'market_key':'1',
+              'market_label':'legacy totals','side':side,'line':line,
+              'line_numeric_source_index_1':str(total) if total is not None else None,
+              'decimal_odds':str(odds),'display_europe':trunc(odds,2),
+              'selection_id':r[4] if len(r)>4 else None,'observed_at_utc':event.get('observed_at_utc')})
     return rows
 
 def dedupe_markets(rows):
