@@ -683,6 +683,67 @@ def _write_selection_file(selection, output_path):
     return output_path
 
 
+
+def _format_yuan(value):
+    amount = as_decimal(value)
+    if amount is None:
+        return "金额未知"
+    return format(amount.quantize(Decimal("0.01")), ",.2f") + " 元"
+
+
+def log_successful_bet_summary(round_results):
+    """Print this round's confirmed successful bets grouped by event."""
+    grouped = {}
+    for result in round_results:
+        event_id = str(result.get("event_id") or "").strip()
+        if not event_id:
+            continue
+        row = grouped.setdefault(event_id, {
+            "event_name": str(result.get("event_name") or event_id),
+            "orders": 0,
+            "amount": Decimal("0"),
+            "amount_known": True,
+        })
+        orders = result.get("orders") or []
+        row["orders"] += int(result.get("accepted_order_count") or len(orders))
+        event_amount = as_decimal(result.get("bet_money_total_yuan"))
+        if event_amount is None:
+            order_amounts = [as_decimal(order.get("bet_money_yuan")) for order in orders]
+            if not order_amounts or any(amount is None for amount in order_amounts):
+                row["amount_known"] = False
+                continue
+            event_amount = sum(order_amounts, Decimal("0"))
+        row["amount"] += event_amount
+
+    print("[投注成功汇总] 本轮确认成功赛事如下：", flush=True)
+    if not grouped:
+        print("[投注成功汇总] 本轮没有确认成功的赛事。", flush=True)
+        return
+    total = Decimal("0")
+    total_known = True
+    for event_id, row in grouped.items():
+        amount_text = _format_yuan(row["amount"]) if row["amount_known"] else "金额未知（接口未返回完整金额）"
+        print(
+            "[投注成功赛事]",
+            f"赛事={row['event_name']}",
+            f"event_id={event_id}",
+            f"成功投注={row['orders']} 单",
+            f"赛事投注金额合计={amount_text}",
+            flush=True,
+        )
+        if row["amount_known"]:
+            total += row["amount"]
+        else:
+            total_known = False
+    total_text = _format_yuan(total) if total_known else "金额不完整，无法准确汇总"
+    print(
+        "[投注成功总计]",
+        f"成功赛事={len(grouped)} 场",
+        f"成功投注金额总计={total_text}",
+        flush=True,
+    )
+
+
 def auto_run_once(browser_session, stake, timeout, output_path, candidates=None):
     """Run one sequential round over the current day's NBA full-game totals."""
     successful_counts = _successful_bet_counts()
@@ -839,6 +900,7 @@ def auto_run_once(browser_session, stake, timeout, output_path, candidates=None)
                 result["input_file"] = str(saved_path)
                 result["auto_run"] = True
                 result["event_id"] = event_id
+                result["event_name"] = matchup
                 round_results.append(result)
                 print("[投注成功]", f"赛事={matchup}", f"全场大小={line}", f"订单数={result.get('accepted_order_count')}", flush=True)
             except Exception as exc:
@@ -856,6 +918,7 @@ def auto_run_once(browser_session, stake, timeout, output_path, candidates=None)
                 if "outcome is uncertain" in message or "duplicate candidate" in message:
                     raise
                 continue
+    log_successful_bet_summary(round_results)
     if events and not browser_session._round_pingbo_matched_event_ids:
         browser_session._print_event_match_diagnostics(
             [rows[0]["event"] for rows in events.values() if rows]
