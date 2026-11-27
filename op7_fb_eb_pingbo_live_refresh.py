@@ -305,7 +305,9 @@ def _market_cache_key(row):
  is_total=(market_key=='1' or any(token in label for token in
   ('大小','总分','總分','total','over/under','over under','totals')))
  if is_total:
-  return ('TOTAL',venue,event,market_id,market_type,market_key,
+  return ('TOTAL',venue,event,market_id,market_type,
+          str(row.get('market_top_key') or row.get('play_id_hpid') or ''),
+          str(row.get('market_name') or ''),market_key,
           str(row.get('side') or ''),str(row.get('selection_id') or ''))
  return ('MARKET',venue,event,market_id,market_type,
          str(row.get('group_id') or ''),str(row.get('line',row.get('line_hv')) or ''),
