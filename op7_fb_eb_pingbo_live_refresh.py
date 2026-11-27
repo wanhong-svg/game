@@ -194,7 +194,11 @@ def capture_request(request, family):
     ALLOW[p.netloc]=set(api.get('read_paths',[]))
    if pingbo_nba_feed:
     ALLOW[p.netloc].add(p.path)
-  if api_family=='pingbo' and p.path in ('/sports-service/sv/mobile/odds-live','/sports-service/sv/mobile/odds-today'):
+  if api_family=='pingbo' and p.path in PINGBO_ODDS_PATHS:
+   _analysis_append({'kind':'browser_auto_request','source':'pingbo_page','method':request.method,
+    'url_without_query':f'{p.scheme}://{p.netloc}{p.path}','path':p.path,
+    'request_params':_request_business_params(request),'resource_type':resource_type,
+    'nba_filter':pingbo_nba_feed,'used_as_request_template':captured})
    print('【pingBo】[CAPTURE]',f'method={request.method}',f'path={p.path}',f'sportId={query_params.get("sportId", [])}',f'leagueIds={query_params.get("leagueIds", [])}',f'nba_filter={pingbo_nba_feed}',f'resource_type={resource_type}',f'captured={captured}',flush=True)
   if api_family=='eb' and p.path in EB_NBA_PAGE_ENDPOINTS:
    state=EB_NBA_CAPTURE_STATE[p.path]
@@ -219,6 +223,81 @@ def capture_request(request, family):
    print(f'浏览器请求已捕获，但端点元数据写入失败：{type(persist_exc).__name__}: {persist_exc}',file=sys.stderr)
  except Exception as exc:
   print(f'浏览器请求捕获/配置更新失败：{type(exc).__name__}: {exc}',file=sys.stderr)
+
+
+# Local Pingbo page-vs-script API diagnostics. Files stay under --out and are never uploaded.
+PINGBO_ANALYSIS_DIR=None
+PINGBO_ANALYSIS_SEQUENCE=0
+PINGBO_ANALYSIS_LAST_UI_HASH=None
+PINGBO_ANALYSIS_LAST_UI_AT=None
+PINGBO_ANALYSIS_LOCK=threading.Lock()
+PINGBO_ODDS_PATHS=('/sports-service/sv/mobile/odds-live','/sports-service/sv/mobile/odds-today')
+
+def _analysis_redact(value):
+ if isinstance(value,dict):
+  out={}
+  for key,item in value.items():
+   if any(token in str(key).lower() for token in ('cookie','token','authorization','password','passwd','secret','session','credential')):
+    out[str(key)]='[REDACTED]'
+   else: out[str(key)]=_analysis_redact(item)
+  return out
+ if isinstance(value,list): return [_analysis_redact(x) for x in value]
+ return value
+
+def _analysis_append(record):
+ if PINGBO_ANALYSIS_DIR is None: return
+ try:
+  PINGBO_ANALYSIS_DIR.mkdir(parents=True,exist_ok=True)
+  record={'recorded_at_utc':now(),**_analysis_redact(record)}
+  with PINGBO_ANALYSIS_LOCK:
+   with (PINGBO_ANALYSIS_DIR/'pingbo_api_trace.jsonl').open('a',encoding='utf-8') as fh:
+    fh.write(json.dumps(record,ensure_ascii=False,default=str)+'\\n')
+ except Exception as exc:
+  print(f'[Pingbo分析] 本地日志写入失败：{type(exc).__name__}: {exc}',file=sys.stderr,flush=True)
+
+def _request_business_params(request):
+ parsed=urllib.parse.urlsplit(request.url)
+ params={'query':urllib.parse.parse_qs(parsed.query,keep_blank_values=True)}
+ raw=getattr(request,'post_data',None)
+ if raw:
+  try:
+   body=json.loads(raw)
+   params['body']=body if isinstance(body,(dict,list)) else raw
+  except Exception:
+   params['body']=urllib.parse.parse_qs(raw,keep_blank_values=True) or raw
+ return _analysis_redact(params)
+
+def _pingbo_page_response(response, page):
+ try:
+  parsed=urllib.parse.urlsplit(response.url)
+  if parsed.path not in PINGBO_ODDS_PATHS: return
+  req=response.request
+  try: payload=response.json()
+  except Exception:
+   try: payload=response.text()
+   except Exception as exc: payload={'body_read_error':str(exc)}
+  ui_text=''
+  try: ui_text=page.locator('body').inner_text(timeout=1500)[:100000]
+  except Exception: pass
+  _analysis_append({'kind':'browser_auto_response','source':'pingbo_page','method':req.method,
+   'url_without_query':f'{parsed.scheme}://{parsed.netloc}{parsed.path}',
+   'path':parsed.path,'request_params':_request_business_params(req),
+   'http_status':response.status,'response_headers':{k:v for k,v in response.headers.items() if k.lower() not in ('set-cookie','authorization')},
+   'response_data':payload,'page_visible_text_at_response':ui_text})
+ except Exception as exc:
+  _analysis_append({'kind':'browser_response_capture_error','error':f'{type(exc).__name__}: {exc}'})
+
+def _capture_pingbo_ui_snapshot(page):
+ global PINGBO_ANALYSIS_LAST_UI_HASH,PINGBO_ANALYSIS_LAST_UI_AT
+ try:
+  visible=page.locator('body').inner_text(timeout=1000)[:100000]
+  digest=__import__('hashlib').sha256(visible.encode('utf-8')).hexdigest()
+  if digest!=PINGBO_ANALYSIS_LAST_UI_HASH:
+   _analysis_append({'kind':'page_visible_text_change','page_url':page.url,'previous_snapshot_at_utc':PINGBO_ANALYSIS_LAST_UI_AT,
+    'snapshot_sha256':digest,'visible_text':visible})
+   PINGBO_ANALYSIS_LAST_UI_HASH=digest; PINGBO_ANALYSIS_LAST_UI_AT=now()
+ except Exception:
+  pass
 
 def _pingbo_rate_limit_info(response):
  """Return Cloudflare 1015 metadata for an HTTP or JSON-level rate-limit response."""
@@ -273,6 +352,12 @@ def request_json(ctx,url,method,headers,params=None,body=None,timeout_ms=15000,f
  retry_delays=[30,60,120,240,300]
  retry_count=0
  while True:
+  if family=='pingbo' and p.path in PINGBO_ODDS_PATHS:
+   assembled=urllib.parse.urlsplit(url)
+   _analysis_append({'kind':'script_request','source':'script_assembled','method':method,
+    'url_without_query':f'{assembled.scheme}://{assembled.netloc}{assembled.path}','path':p.path,
+    'request_params':{'query':urllib.parse.parse_qs(assembled.query,keep_blank_values=True),'body':body if method=='POST' else None},
+    'template_used':bool(template),'template_capture_age_seconds':(time.monotonic()-template['captured_at_monotonic']) if template else None})
   if method=='GET': r=ctx.request.get(url,headers=req_headers,timeout=timeout_ms)
   else: r=ctx.request.post(url,headers=req_headers,data=body or {},timeout=timeout_ms)
   if r.status in (401,403):
@@ -289,7 +374,12 @@ def request_json(ctx,url,method,headers,params=None,body=None,timeout_ms=15000,f
    time.sleep(delay)
    continue
   if not r.ok: raise RuntimeError(f'HTTP {r.status} from {p.netloc}{p.path}')
-  return unwrap(r.json())
+  payload=unwrap(r.json())
+  if family=='pingbo' and p.path in PINGBO_ODDS_PATHS:
+   _analysis_append({'kind':'script_response','source':'script_assembled','method':method,
+    'url_without_query':f'{p.scheme}://{p.netloc}{p.path}','path':p.path,'http_status':r.status,
+    'response_data':payload})
+  return payload
 
 def data_of(obj):
  return obj.get('data') if isinstance(obj,dict) and 'data' in obj else obj
@@ -432,6 +522,10 @@ def main():
    'max_events':{'FB':a.fb_max_events,'EB':a.eb_max_events},'bet_or_order_endpoints':'NOT ALLOWED'},ensure_ascii=False,indent=2)); return
  profiles=Path(a.profiles_dir); (profiles/'op7').mkdir(parents=True,exist_ok=True); (profiles/'pingbo').mkdir(parents=True,exist_ok=True)
  out=Path(a.out); oh=headers_env('OP7_READONLY_HEADERS_JSON'); ph=headers_env('PINGBO_READONLY_HEADERS_JSON')
+ global PINGBO_ANALYSIS_DIR
+ PINGBO_ANALYSIS_DIR=out/'pingbo_api_analysis'
+ PINGBO_ANALYSIS_DIR.mkdir(parents=True,exist_ok=True)
+ print(f'[Pingbo分析] 页面自动请求、脚本请求/响应及页面可见变化将记录到：{PINGBO_ANALYSIS_DIR.resolve()}')
  with sync_playwright() as p:
   opctx=p.chromium.launch_persistent_context(str(profiles/'op7'),headless=False,args=['--no-sandbox','--disable-dev-shm-usage'])
   pbctx=p.chromium.launch_persistent_context(str(profiles/'pingbo'),headless=False,args=['--no-sandbox','--disable-dev-shm-usage'])
@@ -439,6 +533,8 @@ def main():
    for ctx,url,label,family in ((opctx,SITES['OP7_WEB'],'OP7','op7'),(pbctx,SITES['PINGBO_WEB'],'Pingbo','pingbo')):
     page=ctx.pages[0] if ctx.pages else ctx.new_page()
     page.on('request',lambda req,f=family: capture_request(req,f))
+    if family=='pingbo':
+     page.on('response',lambda resp,pg=page: _pingbo_page_response(resp,pg))
     try:
      if page.url=='about:blank': page.goto(url,wait_until='domcontentloaded',timeout=a.timeout*1000)
      else: page.reload(wait_until='domcontentloaded',timeout=a.timeout*1000)
@@ -538,6 +634,7 @@ def main():
      clocks['eb_odds']=time.monotonic()
      print(f'[{now()}] EB盘口刷新：{len(rows)}组盘口')
     if auth_failure: report_auth_failure(auth_failure,a); break
+    _capture_pingbo_ui_snapshot(pbctx.pages[0] if pbctx.pages else None) if pbctx.pages else None
     time.sleep(0.5)
   finally:
    opctx.close(); pbctx.close()
