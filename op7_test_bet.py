@@ -219,8 +219,14 @@ def validate_cross_odds_snapshot(snapshot, threshold=Decimal("1.0052")):
     direction = "Under" if under_pass and not over_pass else (
         "Over" if over_pass and not under_pass else None
     )
+    decision_status = (
+        "ALLOW_EB_UNDER" if under_pass and not over_pass else
+        "FORBID_EB_OVER" if over_pass and not under_pass else
+        "ANOMALY_BOTH_DIRECTIONS" if under_pass and over_pass else
+        "NO_MATCH"
+    )
     return {
-        "direction": direction,
+        "direction": direction, "decision_status": decision_status,
         "a_reciprocal_sum": str(under_sum), "b_reciprocal_sum": str(over_sum),
         "a_pass": under_pass, "b_pass": over_pass,
         "under_pass": under_pass, "over_pass": over_pass,
@@ -794,13 +800,17 @@ def auto_run_once(browser_session, stake, timeout, output_path, candidates=None)
 
     def log_eb_decision(allowed, stage, matchup, event_id, line, result):
         snapshot = result.get("snapshot") or result
-        prefix = "【-- EB允许--】" if allowed else "【-- EB禁止--】"
+        status = result.get("decision_status")
+        prefix = "【-- EB允许--】" if allowed else (
+            "【——-同时满足—异常——-】" if status == "ANOMALY_BOTH_DIRECTIONS"
+            else "【-- EB禁止--】"
+        )
         reason = (
-            "EB Under 双向校验唯一通过，允许进入投注流程"
+            "EB 大分赔率校验唯一通过，允许投注 EB 小分"
             if allowed else
-            ("EB Over 校验通过但最终方向仅允许 Under，匹配成功但不满足投注要求，未投注"
-             if result.get("over_pass") and not result.get("under_pass")
-             else "EB Under 未满足唯一通过条件，未投注")
+            ("EB 小分赔率校验唯一通过，但规则禁止投注 EB 大分"
+             if status == "FORBID_EB_OVER" else
+             "EB 大小两个方向同时满足阈值，属于异常，不产生候选" )
         )
         details = (
             f"阶段={stage} 赛事={matchup} event_id={event_id} 全场大小={line} "
@@ -867,12 +877,16 @@ def auto_run_once(browser_session, stake, timeout, output_path, candidates=None)
                 first_cross = refresh_and_validate_cross_odds(
                     lambda p=probe: browser_session.refresh_cross_odds(p), max_seconds=5.0
                 )
-                log_cross_odds("首次校验", matchup, line, first_cross)
-                if first_cross.get("direction") == "Over":
+                first_status = first_cross.get("decision_status")
+                if first_status == "NO_MATCH":
+                    continue
+                if first_status == "ANOMALY_BOTH_DIRECTIONS":
                     log_eb_decision(False, "首次校验", matchup, event_id, line, first_cross)
                     continue
-                if first_cross.get("direction") != "Under" or not first_cross.get("under_pass"):
+                if first_status == "FORBID_EB_OVER":
                     log_eb_decision(False, "首次校验", matchup, event_id, line, first_cross)
+                    continue
+                if first_status != "ALLOW_EB_UNDER" or not first_cross.get("under_pass"):
                     continue
                 first_candidate = next((
                     item for item in event_candidates
@@ -891,9 +905,13 @@ def auto_run_once(browser_session, stake, timeout, output_path, candidates=None)
                 second_cross = refresh_and_validate_cross_odds(
                     lambda p=first_candidate: browser_session.refresh_cross_odds(p), max_seconds=5.0
                 )
-                log_cross_odds("二次校验", matchup, line, second_cross)
-                if second_cross.get("direction") != "Under" or not second_cross.get("under_pass"):
+                second_status = second_cross.get("decision_status")
+                if second_status == "NO_MATCH":
+                    continue
+                if second_status in ("FORBID_EB_OVER", "ANOMALY_BOTH_DIRECTIONS"):
                     log_eb_decision(False, "二次校验", matchup, event_id, line, second_cross)
+                    continue
+                if second_status != "ALLOW_EB_UNDER" or not second_cross.get("under_pass"):
                     continue
                 candidate = next((
                     item for item in event_candidates
