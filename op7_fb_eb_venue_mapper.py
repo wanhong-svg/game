@@ -175,7 +175,7 @@ def flatten_eb_markets(data,precision=2,event_status_by_mid=None):
                   'display_europe':trunc(odds,precision),'selection_status_os':os,'common_market_status':common,
                   'selection_type_id':opt.get('otd'),'source_code':opt.get('cds'),'side_code':opt.get('ots')})
             out.append({'venue':'EB','event_id':mid,'market_id':first(market,'hid','hlid'),'market_name':market.get('hpn'),
-              'play_id_hpid':market.get('hpid'),'display_type_hpt':market.get('hpt'),'market_enabled_hpon':market.get('hpon'),
+              'market_top_key':first(market,'topKey'),'play_id_hpid':market.get('hpid'),'display_type_hpt':market.get('hpt'),'market_enabled_hpon':market.get('hpon'),
               'market_show_hshow':market.get('hshow'),'market_switch_hsw':market.get('hsw'),'group_id':group.get('hid'),
               'line_hv':group.get('hv'),'group_status_hs':group.get('hs'),'raw_event_status_mo':mo,'selections':sels})
     return out,invalid
