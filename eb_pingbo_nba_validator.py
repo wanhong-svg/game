@@ -120,11 +120,14 @@ def get_eb_under(snapshot_dir):
     rows=[]
     for m in ms.get("data",[]):
         if not isinstance(m,dict) or str(m.get("play_id_hpid"))!="38": continue
-        # hpid=38 is shared by ordinary full-game totals and additional totals.
-        # Only the ordinary market belongs in this EB Under × Pingbo validator.
+        # hpid=38 is shared by both confirmed EB full-game total markets.
+        # Keep the market identity on each validation row so candidates remain distinct.
         market_name=str(m.get("market_name") or "")
         top_key=str(m.get("market_top_key") or m.get("play_id_hpid") or "")
-        if market_name!="全场大小" or top_key!="38": continue
+        if not (
+            (market_name=="全场大小" and top_key=="38")
+            or (market_name=="全场大小-附加盘" and top_key=="38-1")
+        ): continue
         ev=evmap.get(str(m.get("event_id")),{})
         if not is_nba(ev): continue
         selections=m.get("selections",[])
@@ -150,6 +153,8 @@ def get_eb_under(snapshot_dir):
             "observed_at_utc":m.get("observed_at_utc")
         })
     return rows,{"eb_events":len(evmap),"eb_market_groups":len(ms.get("data",[])),
+                 "eb_standard_total_groups":sum(1 for x in ms.get("data",[]) if isinstance(x,dict) and x.get("market_name")=="全场大小" and str(x.get("market_top_key") or x.get("play_id_hpid"))=="38"),
+                 "eb_additional_total_groups":sum(1 for x in ms.get("data",[]) if isinstance(x,dict) and x.get("market_name")=="全场大小-附加盘" and str(x.get("market_top_key") or x.get("play_id_hpid"))=="38-1"),
                  "eb_event_status":es.get("status"),"eb_market_status":ms.get("status")}
 
 def run_validation(eb_rows,pb,min_edge=None):
@@ -161,7 +166,7 @@ def run_validation(eb_rows,pb,min_edge=None):
             pbmap.setdefault(key,[]).append(ev)
     out=[]
     for eb in eb_rows:
-        base={**eb,"match_entry":"EB_FULL_GAME_UNDER_ONLY"}
+        base={**eb,"match_entry":"EB_FULL_GAME_TOTAL_UNDER","eb_market_type":eb.get("market_name"),"eb_market_top_key":eb.get("market_top_key")}
         candidates=pbmap.get(team_pair(eb),[]) if team_pair(eb) else []
         if not candidates:
             out.append({**base,"rule_status":"NO_EVENT_MATCH","rule_reason":"平博未找到双方球队相同的 NBA 赛事"}); continue
