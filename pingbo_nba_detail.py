@@ -9,6 +9,7 @@ is used. Credentials/cookies are supplied only via local environment variables.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import time
@@ -268,9 +269,80 @@ def match_reversed_totals(eb_rows: list[dict[str, Any]],
     return matches
 
 
+def extract_moneyline(event: dict[str, Any]) -> dict[str, Any] | list[Any] | None:
+    """Preserve moneyLine and normalize only explicitly recognizable side/odds fields."""
+    source = event.get("moneyLine")
+    if source is None:
+        source = event.get("moneyline")
+    if source in (None, "", [], {}):
+        return None
+
+    side_aliases = {
+        "home": {"home", "homeodds", "homeodd", "homeprice", "homemoneyline", "h"},
+        "away": {"away", "awayodds", "awayodd", "awayprice", "awaymoneyline", "a"},
+        "draw": {"draw", "drawodds", "drawodd", "drawprice", "drawmoneyline", "d"},
+    }
+    selections = []
+
+    def odds_value(value: Any) -> Any:
+        if isinstance(value, dict):
+            for key in ("odds", "odd", "price", "value", "oddsValue", "decimalOdds", "americanOdds"):
+                if value.get(key) not in (None, ""):
+                    return value.get(key)
+        return value if isinstance(value, (str, int, float)) else None
+
+    def walk(node: Any, path: str = "") -> None:
+        if isinstance(node, dict):
+            for key, value in node.items():
+                normalized = str(key).replace("_", "").replace("-", "").lower()
+                side = next((name for name, aliases in side_aliases.items() if normalized in aliases), None)
+                if side:
+                    raw_odds = odds_value(value)
+                    if raw_odds is not None:
+                        selections.append({"side": side, "raw_odds": raw_odds,
+                                           "decimal_odds": american_to_decimal(raw_odds),
+                                           "source_path": f"{path}.{key}".strip(".")})
+                elif isinstance(value, (dict, list)):
+                    walk(value, f"{path}.{key}".strip("."))
+        elif isinstance(node, list):
+            for index, value in enumerate(node):
+                if isinstance(value, dict):
+                    side_value = str(value.get("side") or value.get("type") or value.get("selection") or "").strip().lower()
+                    side = next((name for name, aliases in side_aliases.items()
+                                 if side_value.replace("_", "").replace("-", "") in aliases), None)
+                    raw_odds = next((value.get(k) for k in ("odds", "odd", "price", "value", "oddsValue", "decimalOdds", "americanOdds")
+                                     if value.get(k) not in (None, "")), None)
+                    if side and raw_odds is not None:
+                        selections.append({"side": side, "raw_odds": raw_odds,
+                                           "decimal_odds": american_to_decimal(raw_odds),
+                                           "source_path": f"{path}[{index}]".strip(".")})
+                    walk(value, f"{path}[{index}]".strip("."))
+
+    walk(source)
+    return {"raw": source, "selections": selections}
+
+
+def period_market_counts(event: dict[str, Any]) -> dict[str, dict[str, int]]:
+    """Count market arrays by period without assuming every market family is present."""
+    periods = event.get("periods")
+    if not isinstance(periods, dict):
+        return {}
+    result = {}
+    for period_id, period in periods.items():
+        if not isinstance(period, dict):
+            continue
+        result[str(period_id)] = {
+            str(market_name): (len(value) if isinstance(value, (list, dict)) else 0)
+            for market_name, value in period.items()
+            if isinstance(value, (list, dict))
+        }
+    return result
+
+
 class PingboClient:
     def __init__(self, base_url: str | None = None,
-                 headers: dict[str, str] | None = None, timeout: int = 15):
+                 headers: dict[str, str] | None = None, timeout: int = 15,
+                 state_path: str | Path | None = None):
         self.base_url = (base_url or os.environ.get("PINGBO_API_BASE_URL",
                           PB_CONFIG["base_url"])).rstrip("/")
         parsed = urllib.parse.urlsplit(self.base_url)
@@ -286,6 +358,48 @@ class PingboClient:
             **(headers or {}),
         }
         self.timeout = timeout
+        self.state_path = Path(state_path) if state_path else Path(
+            os.environ.get("PINGBO_VERSION_STATE_FILE", str(ANALYSIS_DIR / "pingbo_client_state.json")))
+        self._state = self._load_state()
+        self.list_version = self._state.get("list_version")
+        self._event_cache: dict[str, dict[str, Any]] = self._state.get("events", {})
+        self._detail_versions: dict[str, dict[str, Any]] = self._state.get("detail_versions", {})
+
+    def _load_state(self) -> dict[str, Any]:
+        try:
+            value = json.loads(self.state_path.read_text(encoding="utf-8"))
+            return value if isinstance(value, dict) else {}
+        except FileNotFoundError:
+            return {}
+        except Exception as exc:
+            _trace({"kind": "pingbo_state_load_error", "error_type": type(exc).__name__, "error": str(exc)})
+            return {}
+
+    def _save_state(self) -> None:
+        self._state = {"list_version": self.list_version, "events": self._event_cache,
+                       "detail_versions": self._detail_versions,
+                       "saved_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+        try:
+            self.state_path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = self.state_path.with_suffix(self.state_path.suffix + ".tmp")
+            temporary.write_text(json.dumps(self._state, ensure_ascii=False, indent=2), encoding="utf-8")
+            temporary.replace(self.state_path)
+        except Exception as exc:
+            _trace({"kind": "pingbo_state_save_error", "error_type": type(exc).__name__, "error": str(exc)})
+
+    def _record_market_changes(self, event_id: str, event: dict[str, Any]) -> None:
+        previous = self._event_cache.get(event_id, {})
+        old_markets = {"periods": previous.get("periods"), "moneyLine": previous.get("moneyLine", previous.get("moneyline"))}
+        new_markets = {"periods": event.get("periods"), "moneyLine": event.get("moneyLine", event.get("moneyline"))}
+        old_hash = hashlib.sha256(json.dumps(old_markets, sort_keys=True, ensure_ascii=False, default=str).encode()).hexdigest()
+        new_hash = hashlib.sha256(json.dumps(new_markets, sort_keys=True, ensure_ascii=False, default=str).encode()).hexdigest()
+        if old_hash != new_hash:
+            _trace({"kind": "event_market_change", "event_id": event_id,
+                    "changed": previous != {}, "previous_market_sha256": old_hash,
+                    "current_market_sha256": new_hash,
+                    "period_market_counts": period_market_counts(event),
+                    "moneyline_selection_count": len((extract_moneyline(event) or {}).get("selections", []))
+                    if isinstance(extract_moneyline(event), dict) else 0})
 
     def _get(self, path: str, params: dict[str, Any]) -> Any:
         if path not in READ_PATHS:
@@ -294,10 +408,11 @@ class PingboClient:
         request_url = self.base_url + path + "?" + query
         req = urllib.request.Request(request_url, headers=self.headers, method="GET")
         script_params = {"query": {k: [str(v)] for k, v in params.items() if v is not None}}
-        if path in {LIST_PATH, LIVE_PATH}:
-            _trace({"kind": "script_request", "source": "pingbo_nba_detail.PingboClient",
-                    "method": "GET", "url_without_query": self.base_url + path, "path": path,
-                    "request_params": script_params, "page_vs_script_parameter_diff": _compare_page_params(path, script_params)})
+        _trace({"kind": "script_request", "source": "pingbo_nba_detail.PingboClient",
+                "method": "GET", "url_without_query": self.base_url + path, "path": path,
+                "request_params": script_params,
+                "page_vs_script_parameter_diff": _compare_page_params(path, script_params)
+                if path in {LIST_PATH, LIVE_PATH} else None})
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as response:
                 raw = response.read()
@@ -308,10 +423,9 @@ class PingboClient:
             raise PingboApiError(f"Pingbo network error at {path}: {exc.reason}") from exc
         try:
             payload = json.loads(raw.decode("utf-8"))
-            if path in {LIST_PATH, LIVE_PATH}:
-                _trace({"kind": "script_response", "source": "pingbo_nba_detail.PingboClient",
-                        "method": "GET", "url_without_query": self.base_url + path, "path": path,
-                        "http_status": status, "response_data": payload})
+            _trace({"kind": "script_response", "source": "pingbo_nba_detail.PingboClient",
+                    "method": "GET", "url_without_query": self.base_url + path, "path": path,
+                    "http_status": status, "response_data": payload})
             return payload
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise PingboApiError(f"Pingbo invalid JSON at {path}") from exc
@@ -322,31 +436,68 @@ class PingboClient:
                          "_": int(time.time() * 1000), "withCredentials": "true"})
         return data if isinstance(data, list) else []
 
-    def fetch_nba_events(self, version: int = 0) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    def fetch_nba_events(self, version: int | None = None) -> tuple[list[tuple[dict[str, Any], dict[str, Any]]], dict[str, Any]]:
+        # Reuse the last response version across runs; an explicit argument still overrides it.
+        request_version = self.list_version if version is None and self.list_version is not None else (version or 0)
         params = {"sportId": SPORT_ID_BASKETBALL, "periodNumber": 0,
                   "periodNumbers": -1, "betTypes": "HDP,OU,ML_1X2",
-                  "locale": "zh_CN", "version": version,
+                  "locale": "zh_CN", "version": request_version,
                   "_": int(time.time() * 1000), "withCredentials": "true"}
         data = self._get(LIST_PATH, params)
         if not isinstance(data, dict):
             raise PingboApiError("odds-today response is not an object")
-        leagues = [x for x in data.get("leagues", []) if isinstance(x, dict) and is_nba_league(x)]
-        events = []
-        for league in leagues:
-            for event in league.get("events", []):
-                if isinstance(event, dict):
-                    events.append((event, league))
+        raw_leagues = data.get("leagues")
+        if raw_leagues is not None and not isinstance(raw_leagues, list):
+            raise PingboApiError("odds-today response field 'leagues' is not a list")
+
+        response_sport_id = data.get("sportId")
+        incoming: dict[str, dict[str, Any]] = {}
+        for league in raw_leagues or []:
+            if not isinstance(league, dict) or not is_nba_league(
+                    {**league, "sportId": league.get("sportId") or response_sport_id}):
+                continue
+            for event in league.get("events", []) or []:
+                if isinstance(event, dict) and event.get("id") is not None:
+                    event_id = str(event["id"])
+                    incoming[event_id] = {"event": event, "league": league}
+
+        refresh_all = data.get("refreshAll")
+        if refresh_all is True:
+            self._event_cache = incoming
+            cache_action = "replace_full_snapshot"
+        else:
+            # refreshAll=False (or omitted) is a delta: merge known updates, never clear on empty.
+            self._event_cache.update(incoming)
+            cache_action = "merge_incremental" if incoming else "preserve_empty_delta"
+
+        if data.get("version") is not None:
+            self.list_version = data.get("version")
+        self._save_state()
+        events = [(item["event"], item["league"]) for item in self._event_cache.values()
+                  if isinstance(item, dict) and isinstance(item.get("event"), dict)
+                  and isinstance(item.get("league"), dict)]
+        _trace({"kind": "nba_list_cache_summary", "request_version": request_version,
+                "response_version": self.list_version, "refreshAll": refresh_all,
+                "cache_action": cache_action, "incoming_event_count": len(incoming),
+                "cached_event_count": len(events)})
         return events, data
 
     def fetch_event_detail(self, event_id: str, version: int = 0,
                            special_version: int = 0, time_rtk: int | None = None) -> dict[str, Any]:
-        params = {"eventId": event_id, "version": version,
-                  "specialVersion": special_version, "locale": "zh_CN",
-                  "_": int(time.time() * 1000), "withCredentials": "true",
-                  "timeRTK": time_rtk}
+        saved = self._detail_versions.get(str(event_id), {})
+        params = {"eventId": event_id,
+                  "version": saved.get("version", version),
+                  "specialVersion": saved.get("specialVersion", special_version),
+                  "locale": "zh_CN", "_": int(time.time() * 1000),
+                  "withCredentials": "true", "timeRTK": time_rtk}
         data = self._get(EVENT_PATH, params)
         if not isinstance(data, dict):
             raise PingboApiError("event detail response is not an object")
+        self._detail_versions[str(event_id)] = {
+            "version": data.get("version", params["version"]),
+            "specialVersion": data.get("specialVersion", params["specialVersion"]),
+        }
+        self._save_state()
         return data
 
     def fetch_nba_details(self) -> dict[str, Any]:
@@ -369,23 +520,46 @@ class PingboClient:
                 else:
                     detail_source = "EVENT_DETAIL"
                 rows = extract_full_game_totals(normal, league, detail_source)
+                moneyline = extract_moneyline(normal)
+                self._record_market_changes(event_id, normal)
+                self._event_cache[event_id] = {"event": normal, "league": league}
                 result_events.append({
                     **event_identity(event, league),
                     "detail_source": detail_source,
                     "detail_version": detail.get("version"),
                     "special_version": detail.get("specialVersion"),
                     "full_game_totals": rows,
+                    "moneyline": moneyline,
+                    "period_market_counts": period_market_counts(normal),
                 })
             except Exception as exc:
                 errors.append({"event_id": event_id, "error": str(exc)})
+                # Detail failure must not erase the event or its list-embedded markets.
+                fallback_rows = extract_full_game_totals(event, league, "LIST_FALLBACK_DETAIL_ERROR")
+                result_events.append({
+                    **event_identity(event, league),
+                    "detail_source": "LIST_FALLBACK_DETAIL_ERROR",
+                    "detail_version": None, "special_version": None,
+                    "full_game_totals": fallback_rows,
+                    "moneyline": extract_moneyline(event),
+                    "period_market_counts": period_market_counts(event),
+                })
+        self._save_state()
         return {
             "source": "PINGBO",
             "sport_id": SPORT_ID_BASKETBALL,
             "league_id": NBA_LEAGUE_ID,
-            "list_version": list_response.get("version"),
+            "list_version": self.list_version,
             "nba_events": len(listed),
             "events": result_events,
             "errors": errors,
+            "diagnostics": {
+                "listed_count": len(listed), "result_events_count": len(result_events),
+                "detail_error_count": len(errors),
+                "moneyline_event_count": sum(1 for event in result_events if event.get("moneyline")),
+                "period_market_counts": {event["event_id"]: event.get("period_market_counts", {})
+                                         for event in result_events},
+            },
         }
 
 
