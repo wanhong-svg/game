@@ -21,6 +21,7 @@ from pathlib import Path
 ENDPOINTS = json.loads((Path(__file__).with_name("endpoints.json")).read_text(encoding="utf-8"))
 ORDER_AUDIT_PATH = Path(__file__).with_name("bet_order_audit.json")
 MAX_SUCCESSFUL_BETS_PER_EVENT = 5
+_SESSION_SUCCESSFUL_BET_RESULTS = []
 LATEST_PATH, LIMIT_PATH, BET_PATH = ENDPOINTS["apis"]["eb"]["bet_paths"]
 
 
@@ -715,7 +716,7 @@ def log_successful_bet_summary(round_results):
             event_amount = sum(order_amounts, Decimal("0"))
         row["amount"] += event_amount
 
-    print("[投注成功汇总] 本轮确认成功赛事如下：", flush=True)
+    print("[投注成功汇总] 本次运行累计确认成功赛事如下：", flush=True)
     if not grouped:
         print("[投注成功汇总] 本轮没有确认成功的赛事。", flush=True)
         return
@@ -902,6 +903,7 @@ def auto_run_once(browser_session, stake, timeout, output_path, candidates=None)
                 result["event_id"] = event_id
                 result["event_name"] = matchup
                 round_results.append(result)
+                _SESSION_SUCCESSFUL_BET_RESULTS.append(result)
                 print("[投注成功]", f"赛事={matchup}", f"全场大小={line}", f"订单数={result.get('accepted_order_count')}", flush=True)
             except Exception as exc:
                 message = str(exc)
@@ -918,7 +920,7 @@ def auto_run_once(browser_session, stake, timeout, output_path, candidates=None)
                 if "outcome is uncertain" in message or "duplicate candidate" in message:
                     raise
                 continue
-    log_successful_bet_summary(round_results)
+    log_successful_bet_summary(_SESSION_SUCCESSFUL_BET_RESULTS)
     if events and not browser_session._round_pingbo_matched_event_ids:
         browser_session._print_event_match_diagnostics(
             [rows[0]["event"] for rows in events.values() if rows]
