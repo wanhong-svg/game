@@ -112,12 +112,27 @@ class BetPayloadTests(unittest.TestCase):
         self.assertTrue(result["a_pass"])
         self.assertFalse(result["b_pass"])
 
-    def test_cross_odds_rejects_both_or_neither(self):
-        with self.assertRaisesRegex(ValueError, "ambiguous or not profitable"):
-            validate_cross_odds_snapshot({
-                "eb_under":"2.0","eb_over":"2.0","pingbo_over":"2.0","pingbo_under":"2.0",
-                "eb_under_line":"214.5","pingbo_over_line":"214.0"
-            })
+    def test_cross_odds_marks_both_directions_as_anomaly(self):
+        result = validate_cross_odds_snapshot({
+            "eb_under":"2.0","eb_over":"2.0","pingbo_over":"2.0","pingbo_under":"2.0",
+            "eb_under_line":"214.5","pingbo_over_line":"214.0"
+        })
+        self.assertEqual(result["decision_status"],"ANOMALY_BOTH_DIRECTIONS")
+        self.assertIsNone(result["direction"])
+    def test_cross_odds_marks_reverse_only_as_forbidden(self):
+        result = validate_cross_odds_snapshot({
+            "eb_under":"1.10","eb_over":"2.20","pingbo_over":"1.10","pingbo_under":"2.20",
+            "eb_under_line":"214.5","pingbo_over_line":"214.0"
+        })
+        self.assertEqual(result["decision_status"],"FORBID_EB_OVER")
+        self.assertEqual(result["direction"],"Over")
+    def test_cross_odds_marks_neither_direction_as_no_match(self):
+        result = validate_cross_odds_snapshot({
+            "eb_under":"1.10","eb_over":"1.10","pingbo_over":"1.10","pingbo_under":"1.10",
+            "eb_under_line":"214.5","pingbo_over_line":"214.0"
+        })
+        self.assertEqual(result["decision_status"],"NO_MATCH")
+        self.assertIsNone(result["direction"])
 
     def test_cross_odds_requires_eb_under_line_at_least_pingbo_over(self):
         with self.assertRaisesRegex(ValueError, "below"):
