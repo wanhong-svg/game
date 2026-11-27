@@ -120,6 +120,11 @@ def get_eb_under(snapshot_dir):
     rows=[]
     for m in ms.get("data",[]):
         if not isinstance(m,dict) or str(m.get("play_id_hpid"))!="38": continue
+        # hpid=38 is shared by ordinary full-game totals and additional totals.
+        # Only the ordinary market belongs in this EB Under × Pingbo validator.
+        market_name=str(m.get("market_name") or "")
+        top_key=str(m.get("market_top_key") or m.get("play_id_hpid") or "")
+        if market_name!="全场大小" or top_key!="38": continue
         ev=evmap.get(str(m.get("event_id")),{})
         if not is_nba(ev): continue
         selections=m.get("selections",[])
@@ -136,6 +141,7 @@ def get_eb_under(snapshot_dir):
             "points":str(line.normalize()),"odds_decimal":str(under_odds),
             "over_odds_decimal":str(over_odds) if over_odds is not None and over_odds>1 else None,
             "market_id":m.get("market_id"),"group_id":m.get("group_id"),
+            "market_name":market_name,"market_top_key":top_key,"play_id_hpid":m.get("play_id_hpid"),
             "selection_id":under.get("selection_id"),
             "market_status":under.get("common_market_status",m.get("group_status_hs")),
             "start_time_ms":ev.get("start_time_ms"),"raw_status":ev.get("raw_status"),
