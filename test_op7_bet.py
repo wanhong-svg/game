@@ -88,11 +88,20 @@ class BetPayloadTests(unittest.TestCase):
                      "ol":[{"oid":"ordinary-under","ot":"Under","ov":195000,"otv":"小 213.5"}]}]},
             ]
         }
+        with self.assertRaisesRegex(ValueError, "pass market_name and market_top_key"):
+            select_eb_full_game_total(event, "213.5", "Under", match_type=1,
+                place_num=1, cuid="runtime-cuid", device_imei="runtime-device",
+                market_type_finally="EU")
         selection = select_eb_full_game_total(event, "213.5", "Under", match_type=1,
             place_num=1, cuid="runtime-cuid", device_imei="runtime-device",
-            market_type_finally="EU")
+            market_type_finally="EU", market_name="全场大小", market_top_key="38")
         self.assertEqual(selection["market"]["topKey"], "38")
         self.assertEqual(selection["option"]["oid"], "ordinary-under")
+        additional = select_eb_full_game_total(event, "213.5", "Under", match_type=1,
+            place_num=1, cuid="runtime-cuid", device_imei="runtime-device",
+            market_type_finally="EU", market_name="全场大小-附加盘", market_top_key="38-1")
+        self.assertEqual(additional["market"]["topKey"], "38-1")
+        self.assertEqual(additional["option"]["oid"], "additional-under")
 
     def test_cross_odds_selects_only_one_direction(self):
         result = validate_cross_odds_snapshot({
