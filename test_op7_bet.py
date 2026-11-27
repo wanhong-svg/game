@@ -61,7 +61,22 @@ class BetPayloadTests(unittest.TestCase):
         self.assertEqual(selection["option"]["oid"], "under-1")
         self.assertEqual(selection["market"]["hpid"], "38")
 
-    def test_selector_excludes_additional_total_even_when_line_and_side_match(self):
+    def test_selector_includes_additional_total(self):
+        event = {
+            "mid":"nba-3", "tid":"132", "csid":"2", "csna":"篮球", "tn":"NBA", "tnjc":"NBA",
+            "hps":[{"hpid":"38","topKey":"38-1","hpn":"全场大小-附加盘","hl":[
+                {"hid":"additional-line","hv":"223.5",
+                 "ol":[{"oid":"additional-under","ot":"Under","ov":194000,"otv":"小 223.5"}]}
+            ]}]
+        }
+        selection = select_eb_full_game_total(event, "223.5", "Under", match_type=1,
+            place_num=1, cuid="runtime-cuid", device_imei="runtime-device",
+            market_type_finally="EU")
+        self.assertEqual(selection["market"]["hpn"], "全场大小-附加盘")
+        self.assertEqual(selection["market"]["topKey"], "38-1")
+        self.assertEqual(selection["option"]["oid"], "additional-under")
+
+
         event = {
             "mid":"nba-2", "tid":"132", "csid":"2", "csna":"篮球", "tn":"NBA", "tnjc":"NBA",
             "hps":[
