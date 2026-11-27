@@ -285,6 +285,14 @@ def extract_moneyline(event: dict[str, Any]) -> dict[str, Any] | list[Any] | Non
     source = event.get("moneyLine")
     if source is None:
         source = event.get("moneyline")
+    # Confirmed Pingbo schema: moneyLine is nested under periods["0"].
+    periods = event.get("periods")
+    if source is None and isinstance(periods, dict):
+        full_game = periods.get("0")
+        if isinstance(full_game, dict):
+            source = full_game.get("moneyLine")
+            if source is None:
+                source = full_game.get("moneyline")
     if source in (None, "", [], {}):
         return None
 
