@@ -227,6 +227,7 @@ def capture_request(request, family):
 
 # Local Pingbo page-vs-script API diagnostics. Files stay under --out and are never uploaded.
 PINGBO_ANALYSIS_DIR=None
+PINGBO_ANALYSIS_FILE=None
 PINGBO_ANALYSIS_SEQUENCE=0
 PINGBO_ANALYSIS_LAST_UI_HASH=None
 PINGBO_ANALYSIS_LAST_UI_AT=None
@@ -251,7 +252,8 @@ def _analysis_append(record):
   PINGBO_ANALYSIS_DIR.mkdir(parents=True,exist_ok=True)
   record={'recorded_at_utc':now(),**_analysis_redact(record)}
   with PINGBO_ANALYSIS_LOCK:
-   with (PINGBO_ANALYSIS_DIR/'pingbo_api_trace.jsonl').open('a',encoding='utf-8') as fh:
+   PINGBO_ANALYSIS_FILE.parent.mkdir(parents=True,exist_ok=True)
+  with PINGBO_ANALYSIS_FILE.open('a',encoding='utf-8') as fh:
     fh.write(json.dumps(record,ensure_ascii=False,default=str)+'\n')
  except Exception as exc:
   print(f'[Pingbo分析] 本地日志写入失败：{type(exc).__name__}: {exc}',file=sys.stderr,flush=True)
@@ -525,10 +527,15 @@ def main():
    'max_events':{'FB':a.fb_max_events,'EB':a.eb_max_events},'bet_or_order_endpoints':'NOT ALLOWED'},ensure_ascii=False,indent=2)); return
  profiles=Path(a.profiles_dir); (profiles/'op7').mkdir(parents=True,exist_ok=True); (profiles/'pingbo').mkdir(parents=True,exist_ok=True)
  out=Path(a.out); oh=headers_env('OP7_READONLY_HEADERS_JSON'); ph=headers_env('PINGBO_READONLY_HEADERS_JSON')
- global PINGBO_ANALYSIS_DIR
+ global PINGBO_ANALYSIS_DIR,PINGBO_ANALYSIS_FILE
  PINGBO_ANALYSIS_DIR=Path(os.environ.get('PINGBO_API_ANALYSIS_DIR',str(out/'pingbo_api_analysis')))
  PINGBO_ANALYSIS_DIR.mkdir(parents=True,exist_ok=True)
- print(f'[Pingbo分析] 页面自动请求、脚本请求/响应及页面可见变化将记录到：{PINGBO_ANALYSIS_DIR.resolve()}')
+ stamp=datetime.now().strftime('%Y%m%d_%H%M%S')
+ default_file=PINGBO_ANALYSIS_DIR/f'pingbo_api_trace_{stamp}.jsonl'
+ PINGBO_ANALYSIS_FILE=Path(os.environ.get('PINGBO_API_ANALYSIS_FILE',str(default_file)))
+ PINGBO_ANALYSIS_FILE.parent.mkdir(parents=True,exist_ok=True)
+ PINGBO_ANALYSIS_FILE.touch(exist_ok=False) if not PINGBO_ANALYSIS_FILE.exists() else None
+ print(f'[Pingbo分析] 页面自动请求、脚本请求/响应及页面可见变化将记录到：{PINGBO_ANALYSIS_FILE.resolve()}')
  with sync_playwright() as p:
   opctx=p.chromium.launch_persistent_context(str(profiles/'op7'),headless=False,args=['--no-sandbox','--disable-dev-shm-usage'])
   pbctx=p.chromium.launch_persistent_context(str(profiles/'pingbo'),headless=False,args=['--no-sandbox','--disable-dev-shm-usage'])
