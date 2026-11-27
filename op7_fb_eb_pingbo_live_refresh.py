@@ -598,10 +598,15 @@ def main():
      try:
       # Use the exact list endpoint observed in the authenticated EB page.
       # The current page may use noLiveMatchesPagePB rather than matchesPagePB.
-      eb_list_path='/yewu11/v1/m/matchesPagePB'
-      if (('eb',eb_list_path) not in CAPTURED_REQUESTS
-          and ('eb','/yewu11/v1/m/noLiveMatchesPagePB') in CAPTURED_REQUESTS):
-       eb_list_path='/yewu11/v1/m/noLiveMatchesPagePB'
+      eb_list_candidates=[
+       path for path in ('/yewu11/v1/m/matchesPagePB','/yewu11/v1/m/noLiveMatchesPagePB')
+       if ('eb',path) in CAPTURED_REQUESTS
+      ]
+      # If both page modes were observed, follow the endpoint most recently
+      # requested by the visible authenticated page.
+      eb_list_path=(max(eb_list_candidates,
+       key=lambda path:CAPTURED_REQUESTS[('eb',path)]['captured_at_monotonic'])
+       if eb_list_candidates else '/yewu11/v1/m/matchesPagePB')
       res=request_json(opctx,SITES['EB_ORIGIN']+eb_list_path,'POST',oh,body=eb_body,timeout_ms=a.timeout*1000,family='eb')
       eb_rows=eb_events(res)
       eb_list=[x for x in eb_rows if mapper.is_nba_league(x.get('league')) or (mapper.nba_team_id(x.get('home')) is not None and mapper.nba_team_id(x.get('away')) is not None)]
