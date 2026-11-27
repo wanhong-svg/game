@@ -536,7 +536,7 @@ def main():
  a.eb_odds_interval=a.eb_odds_interval or eb_pingbo_interval
  a.pingbo_interval=a.pingbo_interval or eb_pingbo_interval
  vals=[a.fb_list_interval,a.fb_odds_interval,a.eb_list_interval,a.eb_odds_interval,a.pingbo_interval,a.timeout]
- if min(vals)<5: ap.error('赛事列表刷新间隔及超时不得低于5秒')
+ if min(vals)<5: ap.error('所有刷新间隔及超时不得低于5秒')
  cfg=json.loads(Path(a.config).read_text(encoding='utf-8'))
  op=cfg.get('op7',{}); pb=cfg.get('part567',{})
  fb_body=op.get('fb_list_body',{'size':50,'sportId':1,'type':1,'orderBy':1,'current':1,'isPC':True,'languageType':'CMN'})
@@ -546,7 +546,7 @@ def main():
  if not all(isinstance(x,dict) for x in (fb_body,fb_detail,eb_body,eb_q,pb_q)): raise ValueError('All request parameter blocks must be JSON objects')
  if not a.live:
   print(json.dumps({'mode':'DRY_RUN_NO_NETWORK','endpoints':{'FB':'getList POST + getMatchDetail POST','EB':'matchesPagePB POST + getMatchOddsInfoPB GET','Pingbo':'compact/events GET'},
-   'refresh_seconds':{'FB_list':a.fb_list_interval,'FB_odds':20,'EB_list':a.eb_list_interval,'EB_odds':20,'Pingbo_events_and_embedded_odds':20},
+   'refresh_seconds':{'FB_list':a.fb_list_interval,'FB_odds':a.fb_odds_interval,'EB_list':a.eb_list_interval,'EB_odds':a.eb_odds_interval,'Pingbo_events_and_embedded_odds':a.pingbo_interval},
    'max_events':{'FB':a.fb_max_events,'EB':a.eb_max_events},'bet_or_order_endpoints':'NOT ALLOWED'},ensure_ascii=False,indent=2)); return
  profiles=Path(a.profiles_dir); (profiles/'op7').mkdir(parents=True,exist_ok=True); (profiles/'pingbo').mkdir(parents=True,exist_ok=True)
  out=Path(a.out); oh=headers_env('OP7_READONLY_HEADERS_JSON'); ph=headers_env('PINGBO_READONLY_HEADERS_JSON')
