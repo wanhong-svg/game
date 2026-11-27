@@ -425,7 +425,7 @@ def _fb_parse_diagnostics(payload, parsed):
   if not mapper.is_nba_league(league): continue
   counts['nba_league_rows']+=1
   nm=str(x.get('nm') or '')
-  parts=__import__('re').split(r'\\s+vs\\.?\\s+',nm,maxsplit=1,flags=__import__('re').I)
+  parts=__import__('re').split(r'\s+vs\.?\s+',nm,maxsplit=1,flags=__import__('re').I)
   if len(parts)==2: counts['matchup_format_rows']+=1
  return counts
 
