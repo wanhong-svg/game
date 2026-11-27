@@ -1,6 +1,9 @@
 import unittest
 from decimal import Decimal
-from eb_pingbo_nba_validator import run_validation, team_key
+import json
+import tempfile
+from pathlib import Path
+from eb_pingbo_nba_validator import run_validation, team_key, get_eb_under
 
 class ValidatorTests(unittest.TestCase):
     def base(self, line="220", under="2.10", over="2.10"):
@@ -15,6 +18,29 @@ class ValidatorTests(unittest.TestCase):
             "full_game_totals":[{"period":"FULL_GAME","points":line,
                 "over_odds_decimal":over,"under_odds_decimal":under,
                 "line_id":"line-1","unavailable":False,"offline":False}]}]}
+    def test_get_eb_under_excludes_additional_total_sharing_hpid_38(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp)
+            (root/"EB_events_latest.json").write_text(json.dumps({
+                "status":"SUCCESS","data":[{"id":"eb1","sport":"Basketball","league":"NBA",
+                    "home":"主队","away":"客队","start_time_ms":1795554000000}]
+            },ensure_ascii=False),encoding="utf-8")
+            common={"venue":"EB","event_id":"eb1","play_id_hpid":"38","line_hv":"220.5",
+                "selections":[{"selection":"Under","decimal_odds":"2.05","selection_id":"u1"},
+                              {"selection":"Over","decimal_odds":"1.80","selection_id":"o1"}]}
+            ordinary={**common,"market_name":"全场大小","market_top_key":"38",
+                "market_id":"ordinary","group_id":"ordinary-line"}
+            additional={**common,"market_name":"全场大小-附加盘","market_top_key":"38-1",
+                "market_id":"additional","group_id":"additional-line"}
+            (root/"EB_markets_latest.json").write_text(json.dumps({
+                "status":"SUCCESS","data":[ordinary,additional]
+            },ensure_ascii=False),encoding="utf-8")
+            rows,_=get_eb_under(root)
+            self.assertEqual(len(rows),1)
+            self.assertEqual(rows[0]["market_name"],"全场大小")
+            self.assertEqual(rows[0]["market_top_key"],"38")
+            self.assertEqual(rows[0]["group_id"],"ordinary-line")
+
     def test_chinese_team_aliases(self):
         self.assertEqual(team_key("奥兰多魔术队"),"orlandomagic")
         self.assertEqual(team_key("底特律活塞队"),"detroitpistons")
