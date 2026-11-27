@@ -266,12 +266,19 @@ def extract_pingbo_events(payload):
             if not isinstance(league,dict): continue
             league_code=str(first(league,'leagueCode','code') or '').strip().lower()
             league_name=first(league,'leagueName','name','leagueCode') or league_code
-            if league_code!='nba': continue
             for event in league.get('events',[]) or []:
                 if not isinstance(event,dict): continue
                 home,away,home_zh,away_zh=_pingbo_participants(event)
+                # The page can scope the feed by leagueIds while the response
+                # omits a textual leagueCode. Accept that event only when BOTH
+                # participants resolve to known NBA teams.
+                confirmed_nba=(league_code=='nba' or
+                    (nba_team_id(home) is not None and nba_team_id(away) is not None))
+                if not confirmed_nba: continue
                 event_id=first(event,'id','eventId')
                 if not event_id or not home or not away: continue
+                if not league_name or str(league_name).lower()=='none':
+                    league_name='NBA'
                 found.append({
                     'venue':'PINGBO','event_id':str(event_id),'home':str(home),'away':str(away),
                     'home_zh':str(home_zh) if home_zh else None,'away_zh':str(away_zh) if away_zh else None,
