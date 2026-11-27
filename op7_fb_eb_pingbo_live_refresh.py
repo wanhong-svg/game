@@ -230,6 +230,7 @@ PINGBO_ANALYSIS_DIR=None
 PINGBO_ANALYSIS_SEQUENCE=0
 PINGBO_ANALYSIS_LAST_UI_HASH=None
 PINGBO_ANALYSIS_LAST_UI_AT=None
+PINGBO_ANALYSIS_LAST_RESPONSE=None
 PINGBO_ANALYSIS_LOCK=threading.Lock()
 PINGBO_ODDS_PATHS=('/sports-service/sv/mobile/odds-live','/sports-service/sv/mobile/odds-today')
 
@@ -251,7 +252,7 @@ def _analysis_append(record):
   record={'recorded_at_utc':now(),**_analysis_redact(record)}
   with PINGBO_ANALYSIS_LOCK:
    with (PINGBO_ANALYSIS_DIR/'pingbo_api_trace.jsonl').open('a',encoding='utf-8') as fh:
-    fh.write(json.dumps(record,ensure_ascii=False,default=str)+'\\n')
+    fh.write(json.dumps(record,ensure_ascii=False,default=str)+'\n')
  except Exception as exc:
   print(f'[Pingbo分析] 本地日志写入失败：{type(exc).__name__}: {exc}',file=sys.stderr,flush=True)
 
@@ -279,6 +280,8 @@ def _pingbo_page_response(response, page):
   ui_text=''
   try: ui_text=page.locator('body').inner_text(timeout=1500)[:100000]
   except Exception: pass
+  global PINGBO_ANALYSIS_LAST_RESPONSE
+  PINGBO_ANALYSIS_LAST_RESPONSE={'path':parsed.path,'response_at_utc':now(),'http_status':response.status}
   _analysis_append({'kind':'browser_auto_response','source':'pingbo_page','method':req.method,
    'url_without_query':f'{parsed.scheme}://{parsed.netloc}{parsed.path}',
    'path':parsed.path,'request_params':_request_business_params(req),
@@ -294,7 +297,7 @@ def _capture_pingbo_ui_snapshot(page):
   digest=__import__('hashlib').sha256(visible.encode('utf-8')).hexdigest()
   if digest!=PINGBO_ANALYSIS_LAST_UI_HASH:
    _analysis_append({'kind':'page_visible_text_change','page_url':page.url,'previous_snapshot_at_utc':PINGBO_ANALYSIS_LAST_UI_AT,
-    'snapshot_sha256':digest,'visible_text':visible})
+    'snapshot_sha256':digest,'visible_text':visible,'latest_odds_response':PINGBO_ANALYSIS_LAST_RESPONSE})
    PINGBO_ANALYSIS_LAST_UI_HASH=digest; PINGBO_ANALYSIS_LAST_UI_AT=now()
  except Exception:
   pass
