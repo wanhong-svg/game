@@ -45,6 +45,25 @@ python eb_pingbo_nba_validator.py --watch --interval 20
 
 只有 A 方向能够进入 EB Under 候选下注流程；B 方向只作禁止方向诊断。程序的实时投注前复核同样执行该规则。
 
+## Pingbo 页面接口行为分析（新增）
+
+启动 `op7_fb_eb_pingbo_live_refresh.py --live` 后，刷新器会监听 Pingbo 页面自动发出的：
+
+- `/sports-service/sv/mobile/odds-live`
+- `/sports-service/sv/mobile/odds-today`
+
+同时，`pingbo_nba_detail.py` 在脚本请求这两个接口时，也会把实际组装参数和响应写入同一份本地追踪文件。默认位置：
+
+`live_snapshots/pingbo_api_analysis/pingbo_api_trace.jsonl`
+
+每行是一条独立 JSON 记录，包含记录时间、请求来源、接口路径、请求参数、HTTP 状态、响应数据；页面端还会记录响应时页面可见文本，以及轮询观察到的页面文本变化。脚本请求记录会读取最近一次对应页面请求样本，输出参数对比：页面独有参数、脚本独有参数、同名参数值差异。
+
+注意：
+- 当前 `PingboClient` 的赛事列表实现实际请求 `odds-today`，并未主动请求 `odds-live`；因此 `odds-live` 会记录页面样本，但没有脚本请求样本时不会伪造对比结果。
+- 页面文本变化与最近一次赔率接口响应会带时间关联，属于观察证据，不代表已证明接口字段与页面某个赔率变化之间的因果关系。
+- 不记录 Cookie、Authorization、Token、密码等认证信息；日志只写入本机，不提交到 Git。响应体可能较大，请在停止采集后将整个 `pingbo_api_analysis` 目录打包或直接提供 JSONL 文件供后续分析。
+- 如需自定义目录，可在启动脚本前设置 `PINGBO_API_ANALYSIS_DIR`；页面监听脚本默认使用 `--out` 目录下的 `pingbo_api_analysis`，建议保持两者一致。
+
 ## 输出文件
 
 - `eb_pingbo_nba_validation.json`：完整结构化结果。
