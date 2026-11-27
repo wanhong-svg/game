@@ -356,8 +356,10 @@ def flatten_pingbo_markets(event):
         periods=normal.get('periods') if isinstance(normal,dict) else None
         rows=[]
         if isinstance(periods,dict):
+            # Keep this legacy mapper API full-game-only; the new cache module
+            # stores every period independently without widening downstream rows.
             for period_key, period in periods.items():
-                if not isinstance(period,dict): continue
+                if str(period_key) != '0' or not isinstance(period,dict): continue
                 over_under=period.get('overUnder')
                 if isinstance(over_under,dict): over_under=list(over_under.values())
                 for item in over_under if isinstance(over_under,list) else []:
