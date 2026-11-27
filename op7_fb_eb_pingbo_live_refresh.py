@@ -232,9 +232,9 @@ PINGBO_ANALYSIS_SEQUENCE=0
 PINGBO_ANALYSIS_LAST_UI_HASH=None
 PINGBO_ANALYSIS_LAST_UI_AT=None
 PINGBO_ANALYSIS_LAST_RESPONSE=None
-PINGBO_BROWSER_EVENTS=[]
-PINGBO_BROWSER_EVENTS_AT=None
-PINGBO_BROWSER_EVENTS_SOURCE=None
+# Keep the two browser feeds separate: odds-live may legitimately return
+# an empty leagues array while odds-today still contains the page's event list.
+PINGBO_BROWSER_EVENT_FEEDS={}
 PINGBO_ANALYSIS_LOCK=threading.Lock()
 PINGBO_ODDS_PATHS=('/sports-service/sv/mobile/odds-live','/sports-service/sv/mobile/odds-today')
 
@@ -284,14 +284,16 @@ def _pingbo_page_response(response, page):
    except Exception as exc: payload={'body_read_error':str(exc)}
   # Treat the page's actual mobile odds response as a first-class event source.
   # The league/event schema is parsed by the same strict NBA mapper as other feeds.
-  global PINGBO_BROWSER_EVENTS,PINGBO_BROWSER_EVENTS_AT,PINGBO_BROWSER_EVENTS_SOURCE
   decoded=unwrap(payload)
   browser_events=mapper.extract_pingbo_events(decoded)
-  # Refresh the cache even when the page response contains zero NBA events;
-  # otherwise an old non-empty response can be reused after the page is empty.
-  PINGBO_BROWSER_EVENTS=browser_events
-  PINGBO_BROWSER_EVENTS_AT=now()
-  PINGBO_BROWSER_EVENTS_SOURCE=parsed.path
+  # Cache each endpoint independently. An empty odds-live response must not
+  # erase a non-empty odds-today response (or vice versa).
+  PINGBO_BROWSER_EVENT_FEEDS[parsed.path]={
+   'events':browser_events,'captured_at':now(),'http_status':response.status
+  }
+  _analysis_append({'kind':'browser_event_parse_summary','path':parsed.path,
+   'http_status':response.status,'league_count':len(decoded.get('leagues',[])) if isinstance(decoded,dict) and isinstance(decoded.get('leagues'),list) else None,
+   'parsed_event_count':len(browser_events)})
   ui_text=''
   try: ui_text=page.locator('body').inner_text(timeout=1500)[:100000]
   except Exception: pass
@@ -626,16 +628,25 @@ def main():
       compact_rows=mapper.extract_pingbo_events(res)
       # Prefer the exact mobile odds feed observed in the visible page. It carries
       # the live/today NBA event objects and their embedded full-game totals.
-      browser_rows=list(PINGBO_BROWSER_EVENTS or [])
-      browser_age=None
-      if PINGBO_BROWSER_EVENTS_AT:
-       try: browser_age=(datetime.now(timezone.utc)-datetime.fromisoformat(PINGBO_BROWSER_EVENTS_AT.replace('Z','+00:00'))).total_seconds()
-       except Exception: browser_age=None
-      if PINGBO_BROWSER_EVENTS_AT and browser_age is not None and 0<=browser_age<=max(120,a.pingbo_interval*4):
-       # A recent empty browser response is meaningful too; do not silently
-       # replace it with a stale compact-feed result.
-       pb_rows=browser_rows
-       pb_source=f'browser:{PINGBO_BROWSER_EVENTS_SOURCE}'
+      browser_fresh=[]
+      browser_sources=[]
+      max_browser_age=max(120,a.pingbo_interval*4)
+      for feed_path,feed in list(PINGBO_BROWSER_EVENT_FEEDS.items()):
+       try:
+        feed_age=(datetime.now(timezone.utc)-datetime.fromisoformat(feed['captured_at'].replace('Z','+00:00'))).total_seconds()
+       except Exception:
+        feed_age=None
+       if feed_age is not None and 0<=feed_age<=max_browser_age:
+        browser_fresh.extend(feed.get('events',[]))
+        browser_sources.append(feed_path)
+      if browser_sources:
+       # Merge both fresh page feeds by event ID. Empty response from one
+       # endpoint cannot mask events supplied by the other endpoint.
+       merged={}
+       for event in browser_fresh:
+        merged[str(event.get('event_id'))]=event
+       pb_rows=list(merged.values())
+       pb_source='browser:'+','.join(sorted(browser_sources))
       else:
        pb_rows=compact_rows
        pb_source='compact/events'
