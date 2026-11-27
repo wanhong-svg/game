@@ -52,7 +52,7 @@ def _trace(record: dict[str, Any]) -> None:
     try:
         ANALYSIS_DIR.mkdir(parents=True, exist_ok=True)
         with ANALYSIS_FILE.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps({"recorded_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), **_redact(record)}, ensure_ascii=False, default=str) + "\\n")
+            handle.write(json.dumps({"recorded_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), **_redact(record)}, ensure_ascii=False, default=str) + "\n")
     except Exception as exc:
         print(f"[Pingbo分析] trace write failed: {type(exc).__name__}: {exc}")
 
