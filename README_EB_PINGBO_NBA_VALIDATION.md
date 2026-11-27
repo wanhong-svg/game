@@ -23,30 +23,27 @@ python eb_pingbo_nba_validator.py --watch --interval 20
 
 单次校验可去掉 `--watch`。程序读取 `live_snapshots/EB_events_latest.json` 和 `EB_markets_latest.json`，并通过 Pingbo NBA 列表/详情接口获取平博赔率。
 
-## 匹配规则
+## 匹配与交叉赔率规则
 
 - EB 普通全场大小与全场大小-附加盘都进入校验和候选池；两者均使用 `hpid=38`，必须结合 `hpn/topKey` 区分。
 - 普通全场大小：`market_name=全场大小`、`market_top_key=38`。
 - 全场大小-附加盘：`market_name=全场大小-附加盘`、`market_top_key=38-1`。
 - 两种玩法的每条 `hl` 盘口线及其 `hid/hv/ol` 都独立保留，不能互相覆盖。
 - Pingbo 只读取 NBA 赛事详情的全场盘口 `periods["0"].overUnder`。
-- 赛事以标准化后的主客队顺序匹配；不确定时不做反向猜测。
-- EB Under 213.5 对应 Pingbo Over 213.5；盘口线必须完全一致。
+- 赛事以标准化后的主客队、开赛时间和比赛进度匹配；不确定时不做猜测。
+- 盘口入口条件：EB 全场大小分数 >= Pingbo 全场大小分数。
 - 已关闭、离线或赔率无效的盘口不参与计算。
 
-## 计算
+统一使用十进制赔率，阈值严格小于 `1.0052`：
 
-统一使用十进制赔率：
+`A = 1 / Pingbo_Over + 1 / EB_Under`
 
-`combined = 1 / EB_Under + 1 / Pingbo_Over`
+- 仅 A < 1.0052：允许投注 EB Under，并将 EB Under 赔率作为唯一候选下注赔率，输出允许日志。
+- `B = 1 / Pingbo_Under + 1 / EB_Over` 仅 B < 1.0052：输出 EB 禁止日志，并记录对应 EB Over 赔率；不生成投注候选、不允许投注 EB Over。
+- A、B 同时小于 1.0052：标记为双向同时满足异常，不生成候选。
+- A、B 均不小于 1.0052：不输出赔率匹配结果或失败日志。
 
-`Edge = 1 - combined`
-
-`theoretical_roi = Edge / combined`
-
-默认阈值为 0%，即 Edge 必须大于 0 才显示 RULE_PASS。可用 `--min-edge-percent 0.5` 设置至少 0.5% 的 Edge。结果同时输出双方隐含概率、合并概率、Edge 和理论 ROI。
-
-这只是两边赔率的数学筛查，不含手续费、限额、赔率变化、结算规则差异等因素；实际可执行性仍需单独核验。程序不会自动投注。
+只有 A 方向能够进入 EB Under 候选下注流程；B 方向只作禁止方向诊断。程序的实时投注前复核同样执行该规则。
 
 ## 输出文件
 
