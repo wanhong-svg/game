@@ -18,7 +18,7 @@ class ValidatorTests(unittest.TestCase):
             "full_game_totals":[{"period":"FULL_GAME","points":line,
                 "over_odds_decimal":over,"under_odds_decimal":under,
                 "line_id":"line-1","unavailable":False,"offline":False}]}]}
-    def test_get_eb_under_excludes_additional_total_sharing_hpid_38(self):
+    def test_get_eb_under_includes_both_markets_sharing_hpid_38(self):
         with tempfile.TemporaryDirectory() as temp:
             root=Path(temp)
             (root/"EB_events_latest.json").write_text(json.dumps({
@@ -36,10 +36,9 @@ class ValidatorTests(unittest.TestCase):
                 "status":"SUCCESS","data":[ordinary,additional]
             },ensure_ascii=False),encoding="utf-8")
             rows,_=get_eb_under(root)
-            self.assertEqual(len(rows),1)
-            self.assertEqual(rows[0]["market_name"],"全场大小")
-            self.assertEqual(rows[0]["market_top_key"],"38")
-            self.assertEqual(rows[0]["group_id"],"ordinary-line")
+            self.assertEqual(len(rows),2)
+            identities={(row["market_name"],row["market_top_key"],row["group_id"]) for row in rows}
+            self.assertEqual(identities,{("全场大小","38","ordinary-line"),("全场大小-附加盘","38-1","additional-line")})
 
     def test_chinese_team_aliases(self):
         self.assertEqual(team_key("奥兰多魔术队"),"orlandomagic")
