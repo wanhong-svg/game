@@ -204,11 +204,18 @@ def capture_request(request, family):
    if pingbo_nba_feed:
     ALLOW[p.netloc].add(p.path)
   if api_family=='pingbo' and p.path in PINGBO_ODDS_PATHS:
+   stream_key=(p.path,tuple(query_params.get('sportId',[])),tuple(query_params.get('leagueIds',[])))
+   request_tick=time.monotonic()
+   previous_tick=PINGBO_PAGE_REQUEST_LAST.get(stream_key)
+   request_interval=round(request_tick-previous_tick,3) if previous_tick is not None else None
+   PINGBO_PAGE_REQUEST_LAST[stream_key]=request_tick
    _analysis_append({'kind':'browser_auto_request','source':'pingbo_page','method':request.method,
     'url_without_query':f'{p.scheme}://{p.netloc}{p.path}','path':p.path,
     'request_params':_request_business_params(request),'resource_type':resource_type,
-    'nba_filter':pingbo_nba_feed,'used_as_request_template':captured})
-   print('【pingBo】[CAPTURE]',f'method={request.method}',f'path={p.path}',f'sportId={query_params.get("sportId", [])}',f'leagueIds={query_params.get("leagueIds", [])}',f'nba_filter={pingbo_nba_feed}',f'resource_type={resource_type}',f'captured={captured}',flush=True)
+    'nba_filter':pingbo_nba_feed,'used_as_request_template':captured,
+    'request_stream_key':{'sportId':list(stream_key[1]),'leagueIds':list(stream_key[2])},
+    'request_interval_seconds':request_interval})
+   print('【pingBo】[CAPTURE]',f'method={request.method}',f'path={p.path}',f'sportId={query_params.get("sportId", [])}',f'leagueIds={query_params.get("leagueIds", [])}',f'interval={request_interval}',f'nba_filter={pingbo_nba_feed}',f'resource_type={resource_type}',f'captured={captured}',flush=True)
   if api_family=='eb' and p.path in EB_NBA_PAGE_ENDPOINTS:
    state=EB_NBA_CAPTURE_STATE[p.path]
    state['seen']=True
@@ -241,6 +248,7 @@ PINGBO_ANALYSIS_SEQUENCE=0
 PINGBO_ANALYSIS_LAST_UI_HASH=None
 PINGBO_ANALYSIS_LAST_UI_AT=None
 PINGBO_ANALYSIS_LAST_RESPONSE=None
+PINGBO_PAGE_REQUEST_LAST={}
 # Keep the two browser feeds separate: odds-live may legitimately return
 # an empty leagues array while odds-today still contains the page's event list.
 PINGBO_BROWSER_EVENT_FEEDS={}
@@ -328,8 +336,12 @@ def _pingbo_cache_page_feed(path, decoded, browser_events, http_status):
   'http_status':http_status,'refreshAll':refresh_all,
   'version':root.get('version') if isinstance(root,dict) else None,
   'league_count':league_count,'update_count':update_count,
-  'parsed_event_count':len(browser_events),'cache_action':action,
-  'cached_event_count':len(events),
+  'league_names':[str(x.get('name')) for x in leagues if isinstance(x,dict) and x.get('name')][:30] if isinstance(leagues,list) else [],
+  'parsed_event_count':len(browser_events),
+  'parsed_live_event_count':sum(1 for x in browser_events if x.get('live') is True),
+  'parsed_market_row_count':sum(len(mapper.flatten_pingbo_markets(x)) for x in browser_events),
+  'sample_event_ids':[str(x.get('event_id')) for x in browser_events[:20]],
+  'cache_action':action,'cached_event_count':len(events),
   'snapshot_captured_at':PINGBO_BROWSER_EVENT_FEEDS.get(path,{}).get('snapshot_captured_at')})
  return action,events
 
