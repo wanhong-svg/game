@@ -220,6 +220,27 @@ def capture_request(request, family):
  except Exception as exc:
   print(f'浏览器请求捕获/配置更新失败：{type(exc).__name__}: {exc}',file=sys.stderr)
 
+def _pingbo_rate_limit_info(response):
+ """Return Cloudflare 1015 metadata for an HTTP or JSON-level rate-limit response."""
+ payload=None
+ try:
+  payload=response.json()
+ except Exception:
+  try: payload=json.loads(response.text())
+  except Exception: payload=None
+ if not isinstance(payload,dict):
+  return None
+ code=payload.get('error_code')
+ name=str(payload.get('error_name') or '').lower()
+ category=str(payload.get('error_category') or '').lower()
+ cloudflare=payload.get('cloudflare_error') is True
+ if response.status==429 or code==1015 or name=='rate_limited' or (category=='rate_limit' and cloudflare):
+  try: retry_after=max(1,int(payload.get('retry_after') or 30))
+  except (TypeError,ValueError): retry_after=30
+  return {'retry_after':retry_after,'error_code':code or 1015,'error_name':name or 'rate_limited'}
+ return None
+
+
 def request_json(ctx,url,method,headers,params=None,body=None,timeout_ms=15000,family=None):
  p=urllib.parse.urlsplit(url)
  if p.scheme!='https' or p.netloc not in ALLOW or p.path not in ALLOW[p.netloc] or method not in ('GET','POST'):
@@ -248,13 +269,27 @@ def request_json(ctx,url,method,headers,params=None,body=None,timeout_ms=15000,f
  else:
   if params:
    q=urllib.parse.urlencode(params,doseq=True); url+=('&' if '?' in url else '?')+q
- if method=='GET': r=ctx.request.get(url,headers=req_headers,timeout=timeout_ms)
- else: r=ctx.request.post(url,headers=req_headers,data=body or {},timeout=timeout_ms)
- if r.status in (401,403):
-  site='pingbo' if family=='pingbo' else 'op7'
-  raise AuthenticationRequired(site,r.status,f'{p.netloc}{p.path}')
- if not r.ok: raise RuntimeError(f'HTTP {r.status} from {p.netloc}{p.path}')
- return unwrap(r.json())
+
+ retry_delays=[30,60,120,240,300]
+ retry_count=0
+ while True:
+  if method=='GET': r=ctx.request.get(url,headers=req_headers,timeout=timeout_ms)
+  else: r=ctx.request.post(url,headers=req_headers,data=body or {},timeout=timeout_ms)
+  if r.status in (401,403):
+   site='pingbo' if family=='pingbo' else 'op7'
+   raise AuthenticationRequired(site,r.status,f'{p.netloc}{p.path}')
+  rate_limit=_pingbo_rate_limit_info(r) if family=='pingbo' else None
+  if rate_limit:
+   if retry_count>=len(retry_delays):
+    print('[Pingbo] 接口请求被限制，已连续重试 5 次仍未恢复；停止本次请求，请检查请求频率后再启动。',file=sys.stderr,flush=True)
+    raise RuntimeError(f'Pingbo rate limited: Cloudflare {rate_limit["error_code"]} after {retry_count} retries')
+   delay=max(retry_delays[retry_count],rate_limit['retry_after'])
+   retry_count+=1
+   print(f'[Pingbo] 接口请求被限制（Cloudflare 1015 / HTTP {r.status}），第 {retry_count} 次重试，等待 {delay} 秒后再请求。',file=sys.stderr,flush=True)
+   time.sleep(delay)
+   continue
+  if not r.ok: raise RuntimeError(f'HTTP {r.status} from {p.netloc}{p.path}')
+  return unwrap(r.json())
 
 def data_of(obj):
  return obj.get('data') if isinstance(obj,dict) and 'data' in obj else obj
