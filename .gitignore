@@ -9,3 +9,14 @@ live_snapshots/
 .env
 .env.*
 op7_test_selection.json
+
+
+
+# Allow only selected Pingbo diagnostics
+!live_snapshots/
+live_snapshots/*
+!live_snapshots/pingbo_api_analysis/
+live_snapshots/pingbo_api_analysis/*
+!live_snapshots/pingbo_api_analysis/pingbo_api_trace_20261128_015329_924724000.jsonl
+!live_snapshots/pingbo_api_analysis/pingbo_api_trace_20261128_015411_740384000.jsonl
+!live_snapshots/pingbo_api_analysis/pingbo_client_state.json
