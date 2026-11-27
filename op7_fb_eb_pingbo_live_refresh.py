@@ -232,6 +232,9 @@ PINGBO_ANALYSIS_SEQUENCE=0
 PINGBO_ANALYSIS_LAST_UI_HASH=None
 PINGBO_ANALYSIS_LAST_UI_AT=None
 PINGBO_ANALYSIS_LAST_RESPONSE=None
+PINGBO_BROWSER_EVENTS=[]
+PINGBO_BROWSER_EVENTS_AT=None
+PINGBO_BROWSER_EVENTS_SOURCE=None
 PINGBO_ANALYSIS_LOCK=threading.Lock()
 PINGBO_ODDS_PATHS=('/sports-service/sv/mobile/odds-live','/sports-service/sv/mobile/odds-today')
 
@@ -279,6 +282,15 @@ def _pingbo_page_response(response, page):
   except Exception:
    try: payload=response.text()
    except Exception as exc: payload={'body_read_error':str(exc)}
+  # Treat the page's actual mobile odds response as a first-class event source.
+  # The league/event schema is parsed by the same strict NBA mapper as other feeds.
+  global PINGBO_BROWSER_EVENTS,PINGBO_BROWSER_EVENTS_AT,PINGBO_BROWSER_EVENTS_SOURCE
+  decoded=unwrap(payload)
+  browser_events=mapper.extract_pingbo_events(decoded)
+  if browser_events:
+   PINGBO_BROWSER_EVENTS=browser_events
+   PINGBO_BROWSER_EVENTS_AT=now()
+   PINGBO_BROWSER_EVENTS_SOURCE=parsed.path
   ui_text=''
   try: ui_text=page.locator('body').inner_text(timeout=1500)[:100000]
   except Exception: pass
@@ -407,7 +419,16 @@ def fb_events(payload):
 
 def eb_events(payload):
  d=data_of(payload)
- if isinstance(d,dict): d=d.get('data',[])
+ # EB endpoints differ slightly by page mode: some return a list, others
+ # wrap the list in records/data. Normalize only known container shapes.
+ for _ in range(3):
+  if isinstance(d,list): break
+  if not isinstance(d,dict): break
+  if isinstance(d.get('records'),list): d=d['records']; break
+  if isinstance(d.get('list'),list): d=d['list']; break
+  if isinstance(d.get('data'),(dict,list)): d=d['data']; continue
+  if isinstance(d.get('rows'),list): d=d['rows']; break
+  break
  out=[]
  for x in d if isinstance(d,list) else []:
   if not isinstance(x,dict): continue
@@ -572,11 +593,17 @@ def main():
     # EB list
     if tick-clocks['eb_list']>=a.eb_list_interval or not eb_list:
      try:
-      res=request_json(opctx,SITES['EB_ORIGIN']+'/yewu11/v1/m/matchesPagePB','POST',oh,body=eb_body,timeout_ms=a.timeout*1000,family='eb')
+      # Use the exact list endpoint observed in the authenticated EB page.
+      # The current page may use noLiveMatchesPagePB rather than matchesPagePB.
+      eb_list_path='/yewu11/v1/m/matchesPagePB'
+      if (('eb',eb_list_path) not in CAPTURED_REQUESTS
+          and ('eb','/yewu11/v1/m/noLiveMatchesPagePB') in CAPTURED_REQUESTS):
+       eb_list_path='/yewu11/v1/m/noLiveMatchesPagePB'
+      res=request_json(opctx,SITES['EB_ORIGIN']+eb_list_path,'POST',oh,body=eb_body,timeout_ms=a.timeout*1000,family='eb')
       eb_rows=eb_events(res)
       eb_list=[x for x in eb_rows if mapper.is_nba_league(x.get('league'))]
       save_latest(out,'EB_events',eb_list); clocks['eb_list']=time.monotonic()
-      print(f'[{now()}] EB赛事列表刷新：{len(eb_list)}场')
+      print(f'[{now()}] EB赛事列表刷新：{len(eb_list)}场（接口={eb_list_path}，解析={len(eb_rows)}，NBA过滤后={len(eb_list)}）')
      except Exception as e:
       save_failure(out,'EB_events',e); print(f'EB列表刷新失败：{type(e).__name__}: {e}',file=sys.stderr)
       if isinstance(e,AuthenticationRequired): auth_failure=e
@@ -587,7 +614,20 @@ def main():
       pb_params=dict(pb_q); pb_params.setdefault('_',str(int(time.time()*1000)))
       res=request_json(pbctx,SITES['PINGBO_ORIGIN']+'/sports-service/sv/compact/events','GET',ph,params=pb_params,timeout_ms=a.timeout*1000,family='pingbo')
       fetched_at=now()
-      pb_rows=mapper.extract_pingbo_events(res)
+      compact_rows=mapper.extract_pingbo_events(res)
+      # Prefer the exact mobile odds feed observed in the visible page. It carries
+      # the live/today NBA event objects and their embedded full-game totals.
+      browser_rows=list(PINGBO_BROWSER_EVENTS or [])
+      browser_age=None
+      if PINGBO_BROWSER_EVENTS_AT:
+       try: browser_age=(datetime.now(timezone.utc)-datetime.fromisoformat(PINGBO_BROWSER_EVENTS_AT.replace('Z','+00:00'))).total_seconds()
+       except Exception: browser_age=None
+      if browser_rows and (browser_age is None or browser_age<=max(120,a.pingbo_interval*4)):
+       pb_rows=browser_rows
+       pb_source=f'browser:{PINGBO_BROWSER_EVENTS_SOURCE}'
+      else:
+       pb_rows=compact_rows
+       pb_source='compact/events'
       # Unknown league labels are discarded too: only explicitly confirmed NBA
       # events and their embedded markets may enter the monitoring pipeline.
       pb_list=[event for event in pb_rows if mapper.is_nba_league(event.get('league'))]
@@ -596,7 +636,7 @@ def main():
       pb_markets=[r for x in pb_list for r in mapper.flatten_pingbo_markets(x)]
       pb_markets=update_market_cache(market_cache['PINGBO'],'PINGBO',pb_markets,[x['event_id'] for x in pb_list],fetched_at)
       save_latest(out,'Pingbo_events',{'events':normalized,'markets':pb_markets}); clocks['pb']=time.monotonic()
-      print(f'[{now()}] Pingbo赛事+内嵌盘口刷新：{len(pb_list)}场 / {len(pb_markets)}条当前盘口记录')
+      print(f'[{now()}] Pingbo赛事+内嵌盘口刷新：{len(pb_list)}场 / {len(pb_markets)}条当前盘口记录（数据源={pb_source}，接口解析={len(pb_rows)}，NBA过滤后={len(pb_list)}）')
      except Exception as e:
       save_failure(out,'Pingbo_events',e); print(f'Pingbo刷新失败：{type(e).__name__}: {e}',file=sys.stderr)
       if isinstance(e,AuthenticationRequired): auth_failure=e
