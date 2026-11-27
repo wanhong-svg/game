@@ -1,0 +1,36 @@
+{
+  "generated_at_utc": "2026-11-27T18:07:25.847907+00:00",
+  "rule": {
+    "name": "EB_UNDER_ENTRY_TWO_WAY_CROSS_CHECK",
+    "entry_condition": "同一场正规 NBA；EB 全场小分盘口 >= Pingbo 全场大分盘口",
+    "cross_checks": [
+      "1/Pingbo_Over + 1/EB_Under < 1.0052",
+      "1/Pingbo_Under + 1/EB_Over < 1.0052"
+    ],
+    "both_pass": "ANOMALY_BOTH_DIRECTIONS",
+    "neither_pass": "NO_MATCH"
+  },
+  "summary": {
+    "eb_under_rows": 0,
+    "candidate_a": 0,
+    "candidate_b": 0,
+    "forbidden_b": 0,
+    "anomalies": 0,
+    "no_match": 0,
+    "unmatched": 0
+  },
+  "results": [],
+  "safety": "只读校验，不含投注、订单、钱包或资金接口",
+  "source_meta": {
+    "eb": {
+      "eb_events": 0,
+      "eb_market_groups": 0,
+      "eb_standard_total_groups": 0,
+      "eb_additional_total_groups": 0,
+      "eb_event_status": "SUCCESS",
+      "eb_market_status": "SUCCESS"
+    },
+    "pingbo_nba_events": 11,
+    "pingbo_errors": []
+  }
+}

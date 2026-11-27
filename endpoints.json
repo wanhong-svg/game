@@ -17,19 +17,26 @@
   },
   "apis": {
     "fb": {
-      "base_url": "https://api.738z3.com",
+      "base_url": "https://api.v4z22d.com",
       "hosts": [
-        "api.738z3.com"
+        "api.738z3.com",
+        "api.v4z22d.com"
       ],
       "read_paths": [
         "/v1/match/getList",
         "/v1/match/getMatchDetail"
       ],
-      "bet_paths": []
+      "bet_paths": [],
+      "observed_paths": [
+        "/v1/match/getList",
+        "/v1/match/getOnSaleLeagues",
+        "/v1/match/statistical"
+      ]
     },
     "eb": {
       "base_url": "https://cgweb.op7uat.com",
       "hosts": [
+        "api.bjwlt64r.com",
         "api.dbsportxxx278gwf4.com",
         "api.r4bud5u7.com",
         "cgweb.op7uat.com"
@@ -53,12 +60,21 @@
         "/yewu13/v1/betOrder/client/queryMarketMaxMinBetMoney",
         "/yewu13/v1/betOrder/client/bet"
       ],
-      "nba_read_base_url": "https://cgweb.op7uat.com"
+      "nba_read_base_url": "https://api.bjwlt64r.com",
+      "observed_paths": [
+        "/yewu11/pub/v1/m/menu/initPB",
+        "/yewu11/v1/games/imgDomain",
+        "/yewu11/v1/m/esportsMatchesPB",
+        "/yewu11/v1/m/noLiveMatchesPagePB"
+      ]
     },
     "common": {
-      "base_url": "https://api.live336.com",
+      "base_url": "https://cgweb.op7uat.com",
       "hosts": [
-        "api.live336.com"
+        "api.gqkm6y.cc",
+        "api.live336.com",
+        "cgweb.op7uat.com",
+        "op7-spa-testing.test800.xyz"
       ],
       "read_paths": [
         "/api/match/sport/listbytype",
@@ -69,11 +85,43 @@
       "game_type_map": {
         "FB": "FB",
         "OB": "EB"
-      }
+      },
+      "observed_paths": [
+        "/api/4/envelope/",
+        "/api/center/getTopMustMessage",
+        "/api/center/getTopUnread",
+        "/api/game/fb/token",
+        "/api/game/match/follow/v2/list",
+        "/api/game/obsport/token",
+        "/api/game/vendor/footer",
+        "/api/game/withdraw/all",
+        "/api/helpCenter/getQuestions",
+        "/api/home/text/info/slide",
+        "/api/match/live/check/winner",
+        "/api/match/sport/listbytype",
+        "/api/member/info",
+        "/api/popularEventsLive",
+        "/api/recent/list",
+        "/api/social/config/getConfig",
+        "/api/social/message/unreadCount",
+        "/api/webPush/vapidPublicKey",
+        "/api/website/check/ip2",
+        "/api/website/getCarouselResourceSlots",
+        "/api/website/getCustomerConfiguration",
+        "/api/website/getSponsoredResourcePosition",
+        "/api/website/home/list",
+        "/api/website/notice/fbList",
+        "/api/website/notice/list",
+        "/api/website/setting",
+        "/api/website/siterank/list",
+        "/api/website/slot/list",
+        "/api/website/switch/list"
+      ]
     },
     "pingbo": {
-      "base_url": "https://www.pin135.com",
+      "base_url": "https://www.part567.com",
       "hosts": [
+        "ekr.zdassets.com",
         "www.part567.com",
         "www.pin135.com"
       ],
@@ -94,6 +142,56 @@
       ],
       "detail_paths": [
         "/sports-service/sv/mobile/event"
+      ],
+      "observed_paths": [
+        "/cms/assets/17b3cb64-c0ba-4784-83ab-f2f509b7415b",
+        "/cms/assets/1be46c13-1601-4bb9-a885-415c7dded02b",
+        "/cms/assets/2d362bb4-7b8f-472a-91be-5f3ef5e71688",
+        "/cms/assets/592d18aa-3a1f-4b8c-a709-7e184b85648b",
+        "/cms/assets/79b95909-e47d-4b93-a1bb-acc34ce0662f",
+        "/cms/assets/7a688588-fbc1-4602-b101-75eb78427ef0",
+        "/cms/assets/8075d6a0-44df-46a2-a945-9bea4eb5f01e",
+        "/cms/assets/a8f46976-ae9e-4ec1-a489-81f488c593cf",
+        "/cms/assets/a9026860-c37e-4796-b958-3f0ae91ba981",
+        "/cms/assets/a9946268-dc7a-4735-bf32-3749aecce048",
+        "/cms/assets/b2706ed4-8f1f-496d-9e6d-2685f39eff02",
+        "/cms/assets/db98636a-41b5-4dff-8eea-df770d582d80",
+        "/cms/assets/ec95f2a9-b93c-4163-a51c-b56bf4891905",
+        "/cms/assets/f19f0b75-1213-46f2-adf6-62d9d7d71fe8",
+        "/cms/assets/f351cf3c-1f4c-4ffa-b5b5-101235462e73",
+        "/cms/graphql",
+        "/compose/8834247d-a969-42b8-8487-46d570c22e4a",
+        "/dp-iframe/",
+        "/esthardsk/locales/en/en.json",
+        "/esthardsk/locales/zh-cn/zh-cn.json",
+        "/favicon.ico",
+        "/member-auth/v2/auth",
+        "/member-auth/v2/keep-alive",
+        "/member-auth/v2/swstoken",
+        "/member-service/v2/account-balance",
+        "/member-service/v2/announcement/list-limit",
+        "/member-service/v2/data.nocache-v2",
+        "/member-service/v2/finger-print",
+        "/member-service/v2/get-guest-setting",
+        "/member-service/v2/get-sum-announcement-unread",
+        "/member-service/v2/load-new-mobile-template",
+        "/member-service/v2/load-template",
+        "/member-service/v2/quick-stake/get-info",
+        "/member-service/v2/sportsbook-favorite/get-sports-book-favorite-by-user-id",
+        "/member-service/v2/system/status",
+        "/member-service/v2/tournament/buttons",
+        "/sports-service/sv/mobile/event",
+        "/sports-service/sv/mobile/league-events",
+        "/sports-service/sv/mobile/leagues",
+        "/sports-service/sv/mobile/market-filters",
+        "/sports-service/sv/mobile/odds-live",
+        "/sports-service/sv/mobile/odds-today",
+        "/sports-service/sv/mobile/sports",
+        "/sports-service/sv/odds/periods",
+        "/xst/asset/icon/selection.json",
+        "/xst/locale/zh-cn.json",
+        "/xst/theme/default.json",
+        "/xst/theme/pa.json"
       ]
     }
   },
@@ -105,5 +203,1042 @@
       "::1"
     ],
     "note": "External test hosts must be added explicitly to OP7_TEST_BET_ALLOWED_HOSTS after verifying they are not production."
-  }
+  },
+  "discovered_endpoints": [
+    {
+      "family": "common",
+      "origin": "https://api.gqkm6y.cc",
+      "host": "api.gqkm6y.cc",
+      "path": "/api/4/envelope/",
+      "resource_type": "fetch",
+      "method": "POST",
+      "last_observed_at_utc": "2026-11-27T17:53:35.868+00:00"
+    },
+    {
+      "family": "common",
+      "origin": "https://api.live336.com",
+      "host": "api.live336.com",
+      "path": "/api/match/live/check/winner",
+      "resource_type": "fetch",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T18:00:48.529+00:00"
+    },
+    {
+      "family": "common",
+      "origin": "https://api.live336.com",
+      "host": "api.live336.com",
+      "path": "/api/match/sport/listbytype",
+      "resource_type": "fetch",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T18:00:44.717+00:00"
+    },
+    {
+      "family": "common",
+      "origin": "https://api.live336.com",
+      "host": "api.live336.com",
+      "path": "/api/popularEventsLive",
+      "resource_type": "fetch",
+      "method": "POST",
+      "last_observed_at_utc": "2026-11-27T18:00:44.719+00:00"
+    },
+    {
+      "family": "common",
+      "origin": "https://cgweb.op7uat.com",
+      "host": "cgweb.op7uat.com",
+      "path": "/api/center/getTopMustMessage",
+      "resource_type": "fetch",
+      "method": "POST",
+      "last_observed_at_utc": "2026-11-27T17:58:37.994+00:00"
+    },
+    {
+      "family": "common",
+      "origin": "https://cgweb.op7uat.com",
+      "host": "cgweb.op7uat.com",
+      "path": "/api/center/getTopUnread",
+      "resource_type": "fetch",
+      "method": "POST",
+      "last_observed_at_utc": "2026-11-27T17:58:37.996+00:00"
+    },
+    {
+      "family": "common",
+      "origin": "https://cgweb.op7uat.com",
+      "host": "cgweb.op7uat.com",
+      "path": "/api/game/fb/token",
+      "resource_type": "fetch",
+      "method": "POST",
+      "last_observed_at_utc": "2026-11-27T17:58:42.398+00:00"
+    },
+    {
+      "family": "common",
+      "origin": "https://cgweb.op7uat.com",
+      "host": "cgweb.op7uat.com",
+      "path": "/api/game/match/follow/v2/list",
+      "resource_type": "fetch",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T18:00:44.714+00:00"
+    },
+    {
+      "family": "common",
+      "origin": "https://cgweb.op7uat.com",
+      "host": "cgweb.op7uat.com",
+      "path": "/api/game/obsport/token",
+      "resource_type": "fetch",
+      "method": "POST",
+      "last_observed_at_utc": "2026-11-27T17:58:43.431+00:00"
+    },
+    {
+      "family": "common",
+      "origin": "https://cgweb.op7uat.com",
+      "host": "cgweb.op7uat.com",
+      "path": "/api/game/vendor/footer",
+      "resource_type": "fetch",
+      "method": "POST",
+      "last_observed_at_utc": "2026-11-27T18:06:53.566+00:00"
+    },
+    {
+      "family": "common",
+      "origin": "https://cgweb.op7uat.com",
+      "host": "cgweb.op7uat.com",
+      "path": "/api/helpCenter/getQuestions",
+      "resource_type": "fetch",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T18:00:44.706+00:00"
+    },
+    {
+      "family": "common",
+      "origin": "https://cgweb.op7uat.com",
+      "host": "cgweb.op7uat.com",
+      "path": "/api/home/text/info/slide",
+      "resource_type": "fetch",
+      "method": "POST",
+      "last_observed_at_utc": "2026-11-27T18:00:44.712+00:00"
+    },
+    {
+      "family": "common",
+      "origin": "https://cgweb.op7uat.com",
+      "host": "cgweb.op7uat.com",
+      "path": "/api/member/info",
+      "resource_type": "fetch",
+      "method": "POST",
+      "last_observed_at_utc": "2026-11-27T18:03:39.765+00:00"
+    },
+    {
+      "family": "common",
+      "origin": "https://cgweb.op7uat.com",
+      "host": "cgweb.op7uat.com",
+      "path": "/api/recent/list",
+      "resource_type": "fetch",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T17:58:37.999+00:00"
+    },
+    {
+      "family": "common",
+      "origin": "https://cgweb.op7uat.com",
+      "host": "cgweb.op7uat.com",
+      "path": "/api/social/config/getConfig",
+      "resource_type": "fetch",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T17:58:38.005+00:00"
+    },
+    {
+      "family": "common",
+      "origin": "https://cgweb.op7uat.com",
+      "host": "cgweb.op7uat.com",
+      "path": "/api/social/message/unreadCount",
+      "resource_type": "fetch",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T17:58:38.011+00:00"
+    },
+    {
+      "family": "common",
+      "origin": "https://cgweb.op7uat.com",
+      "host": "cgweb.op7uat.com",
+      "path": "/api/website/check/ip2",
+      "resource_type": "fetch",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T18:00:44.722+00:00"
+    },
+    {
+      "family": "common",
+      "origin": "https://cgweb.op7uat.com",
+      "host": "cgweb.op7uat.com",
+      "path": "/api/website/getCarouselResourceSlots",
+      "resource_type": "fetch",
+      "method": "POST",
+      "last_observed_at_utc": "2026-11-27T17:58:18.350+00:00"
+    },
+    {
+      "family": "common",
+      "origin": "https://cgweb.op7uat.com",
+      "host": "cgweb.op7uat.com",
+      "path": "/api/website/getCustomerConfiguration",
+      "resource_type": "fetch",
+      "method": "POST",
+      "last_observed_at_utc": "2026-11-27T17:58:37.989+00:00"
+    },
+    {
+      "family": "common",
+      "origin": "https://cgweb.op7uat.com",
+      "host": "cgweb.op7uat.com",
+      "path": "/api/website/getSponsoredResourcePosition",
+      "resource_type": "fetch",
+      "method": "POST",
+      "last_observed_at_utc": "2026-11-27T17:58:18.348+00:00"
+    },
+    {
+      "family": "common",
+      "origin": "https://cgweb.op7uat.com",
+      "host": "cgweb.op7uat.com",
+      "path": "/api/website/home/list",
+      "resource_type": "fetch",
+      "method": "POST",
+      "last_observed_at_utc": "2026-11-27T17:58:37.992+00:00"
+    },
+    {
+      "family": "common",
+      "origin": "https://cgweb.op7uat.com",
+      "host": "cgweb.op7uat.com",
+      "path": "/api/website/notice/fbList",
+      "resource_type": "fetch",
+      "method": "POST",
+      "last_observed_at_utc": "2026-11-27T17:58:42.393+00:00"
+    },
+    {
+      "family": "common",
+      "origin": "https://cgweb.op7uat.com",
+      "host": "cgweb.op7uat.com",
+      "path": "/api/website/notice/list",
+      "resource_type": "fetch",
+      "method": "POST",
+      "last_observed_at_utc": "2026-11-27T17:58:18.343+00:00"
+    },
+    {
+      "family": "common",
+      "origin": "https://cgweb.op7uat.com",
+      "host": "cgweb.op7uat.com",
+      "path": "/api/website/setting",
+      "resource_type": "fetch",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T17:58:18.337+00:00"
+    },
+    {
+      "family": "common",
+      "origin": "https://cgweb.op7uat.com",
+      "host": "cgweb.op7uat.com",
+      "path": "/api/website/siterank/list",
+      "resource_type": "fetch",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T18:00:44.708+00:00"
+    },
+    {
+      "family": "common",
+      "origin": "https://cgweb.op7uat.com",
+      "host": "cgweb.op7uat.com",
+      "path": "/api/website/slot/list",
+      "resource_type": "fetch",
+      "method": "POST",
+      "last_observed_at_utc": "2026-11-27T17:58:18.340+00:00"
+    },
+    {
+      "family": "common",
+      "origin": "https://cgweb.op7uat.com",
+      "host": "cgweb.op7uat.com",
+      "path": "/api/website/switch/list",
+      "resource_type": "fetch",
+      "method": "POST",
+      "last_observed_at_utc": "2026-11-27T18:07:27.469+00:00"
+    },
+    {
+      "family": "common",
+      "origin": "https://op7-spa-testing.test800.xyz",
+      "host": "op7-spa-testing.test800.xyz",
+      "path": "/api/center/getTopMustMessage",
+      "resource_type": "fetch",
+      "method": "POST",
+      "last_observed_at_utc": "2026-11-27T17:53:34.171+00:00"
+    },
+    {
+      "family": "common",
+      "origin": "https://op7-spa-testing.test800.xyz",
+      "host": "op7-spa-testing.test800.xyz",
+      "path": "/api/center/getTopUnread",
+      "resource_type": "fetch",
+      "method": "POST",
+      "last_observed_at_utc": "2026-11-27T17:53:34.172+00:00"
+    },
+    {
+      "family": "common",
+      "origin": "https://op7-spa-testing.test800.xyz",
+      "host": "op7-spa-testing.test800.xyz",
+      "path": "/api/game/vendor/footer",
+      "resource_type": "fetch",
+      "method": "POST",
+      "last_observed_at_utc": "2026-11-27T17:53:34.168+00:00"
+    },
+    {
+      "family": "common",
+      "origin": "https://op7-spa-testing.test800.xyz",
+      "host": "op7-spa-testing.test800.xyz",
+      "path": "/api/game/withdraw/all",
+      "resource_type": "fetch",
+      "method": "POST",
+      "last_observed_at_utc": "2026-11-27T17:53:35.255+00:00"
+    },
+    {
+      "family": "common",
+      "origin": "https://op7-spa-testing.test800.xyz",
+      "host": "op7-spa-testing.test800.xyz",
+      "path": "/api/home/text/info/slide",
+      "resource_type": "fetch",
+      "method": "POST",
+      "last_observed_at_utc": "2026-11-27T17:53:34.155+00:00"
+    },
+    {
+      "family": "common",
+      "origin": "https://op7-spa-testing.test800.xyz",
+      "host": "op7-spa-testing.test800.xyz",
+      "path": "/api/member/info",
+      "resource_type": "fetch",
+      "method": "POST",
+      "last_observed_at_utc": "2026-11-27T17:53:35.854+00:00"
+    },
+    {
+      "family": "common",
+      "origin": "https://op7-spa-testing.test800.xyz",
+      "host": "op7-spa-testing.test800.xyz",
+      "path": "/api/social/config/getConfig",
+      "resource_type": "fetch",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T17:53:34.170+00:00"
+    },
+    {
+      "family": "common",
+      "origin": "https://op7-spa-testing.test800.xyz",
+      "host": "op7-spa-testing.test800.xyz",
+      "path": "/api/social/message/unreadCount",
+      "resource_type": "fetch",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T17:53:34.176+00:00"
+    },
+    {
+      "family": "common",
+      "origin": "https://op7-spa-testing.test800.xyz",
+      "host": "op7-spa-testing.test800.xyz",
+      "path": "/api/webPush/vapidPublicKey",
+      "resource_type": "fetch",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T17:53:34.057+00:00"
+    },
+    {
+      "family": "common",
+      "origin": "https://op7-spa-testing.test800.xyz",
+      "host": "op7-spa-testing.test800.xyz",
+      "path": "/api/website/check/ip2",
+      "resource_type": "fetch",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T17:53:34.153+00:00"
+    },
+    {
+      "family": "common",
+      "origin": "https://op7-spa-testing.test800.xyz",
+      "host": "op7-spa-testing.test800.xyz",
+      "path": "/api/website/getCarouselResourceSlots",
+      "resource_type": "fetch",
+      "method": "POST",
+      "last_observed_at_utc": "2026-11-27T17:53:34.178+00:00"
+    },
+    {
+      "family": "common",
+      "origin": "https://op7-spa-testing.test800.xyz",
+      "host": "op7-spa-testing.test800.xyz",
+      "path": "/api/website/getCustomerConfiguration",
+      "resource_type": "fetch",
+      "method": "POST",
+      "last_observed_at_utc": "2026-11-27T17:53:34.180+00:00"
+    },
+    {
+      "family": "common",
+      "origin": "https://op7-spa-testing.test800.xyz",
+      "host": "op7-spa-testing.test800.xyz",
+      "path": "/api/website/getSponsoredResourcePosition",
+      "resource_type": "fetch",
+      "method": "POST",
+      "last_observed_at_utc": "2026-11-27T17:53:34.173+00:00"
+    },
+    {
+      "family": "common",
+      "origin": "https://op7-spa-testing.test800.xyz",
+      "host": "op7-spa-testing.test800.xyz",
+      "path": "/api/website/home/list",
+      "resource_type": "fetch",
+      "method": "POST",
+      "last_observed_at_utc": "2026-11-27T17:53:34.154+00:00"
+    },
+    {
+      "family": "common",
+      "origin": "https://op7-spa-testing.test800.xyz",
+      "host": "op7-spa-testing.test800.xyz",
+      "path": "/api/website/notice/list",
+      "resource_type": "fetch",
+      "method": "POST",
+      "last_observed_at_utc": "2026-11-27T17:53:34.166+00:00"
+    },
+    {
+      "family": "common",
+      "origin": "https://op7-spa-testing.test800.xyz",
+      "host": "op7-spa-testing.test800.xyz",
+      "path": "/api/website/setting",
+      "resource_type": "fetch",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T17:53:34.156+00:00"
+    },
+    {
+      "family": "common",
+      "origin": "https://op7-spa-testing.test800.xyz",
+      "host": "op7-spa-testing.test800.xyz",
+      "path": "/api/website/siterank/list",
+      "resource_type": "fetch",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T17:53:34.163+00:00"
+    },
+    {
+      "family": "common",
+      "origin": "https://op7-spa-testing.test800.xyz",
+      "host": "op7-spa-testing.test800.xyz",
+      "path": "/api/website/slot/list",
+      "resource_type": "fetch",
+      "method": "POST",
+      "last_observed_at_utc": "2026-11-27T17:53:34.164+00:00"
+    },
+    {
+      "family": "common",
+      "origin": "https://op7-spa-testing.test800.xyz",
+      "host": "op7-spa-testing.test800.xyz",
+      "path": "/api/website/switch/list",
+      "resource_type": "fetch",
+      "method": "POST",
+      "last_observed_at_utc": "2026-11-27T17:53:34.169+00:00"
+    },
+    {
+      "family": "eb",
+      "origin": "https://api.bjwlt64r.com",
+      "host": "api.bjwlt64r.com",
+      "path": "/yewu11/pub/v1/m/menu/initPB",
+      "resource_type": "fetch",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T18:06:54.585+00:00"
+    },
+    {
+      "family": "eb",
+      "origin": "https://api.bjwlt64r.com",
+      "host": "api.bjwlt64r.com",
+      "path": "/yewu11/v1/games/imgDomain",
+      "resource_type": "fetch",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T18:00:08.749+00:00"
+    },
+    {
+      "family": "eb",
+      "origin": "https://api.bjwlt64r.com",
+      "host": "api.bjwlt64r.com",
+      "path": "/yewu11/v1/m/esportsMatchesPB",
+      "resource_type": "fetch",
+      "method": "POST",
+      "last_observed_at_utc": "2026-11-27T18:06:54.587+00:00"
+    },
+    {
+      "family": "eb",
+      "origin": "https://api.bjwlt64r.com",
+      "host": "api.bjwlt64r.com",
+      "path": "/yewu11/v1/m/noLiveMatchesPagePB",
+      "resource_type": "fetch",
+      "method": "POST",
+      "last_observed_at_utc": "2026-11-27T18:07:48.533+00:00"
+    },
+    {
+      "family": "fb",
+      "origin": "https://api.v4z22d.com",
+      "host": "api.v4z22d.com",
+      "path": "/v1/match/getList",
+      "resource_type": "fetch",
+      "method": "POST",
+      "last_observed_at_utc": "2026-11-27T17:58:46.780+00:00"
+    },
+    {
+      "family": "fb",
+      "origin": "https://api.v4z22d.com",
+      "host": "api.v4z22d.com",
+      "path": "/v1/match/getOnSaleLeagues",
+      "resource_type": "fetch",
+      "method": "POST",
+      "last_observed_at_utc": "2026-11-27T17:58:46.783+00:00"
+    },
+    {
+      "family": "fb",
+      "origin": "https://api.v4z22d.com",
+      "host": "api.v4z22d.com",
+      "path": "/v1/match/statistical",
+      "resource_type": "fetch",
+      "method": "POST",
+      "last_observed_at_utc": "2026-11-27T17:58:46.778+00:00"
+    },
+    {
+      "family": "op7_other",
+      "origin": "https://api.bjwlt64r.com",
+      "host": "api.bjwlt64r.com",
+      "path": "/yewu12/api/user/amount",
+      "resource_type": "fetch",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T18:07:26.449+00:00"
+    },
+    {
+      "family": "op7_other",
+      "origin": "https://api.fpjs.io",
+      "host": "api.fpjs.io",
+      "path": "/",
+      "resource_type": "xhr",
+      "method": "POST",
+      "last_observed_at_utc": "2026-11-27T17:58:40.069+00:00"
+    },
+    {
+      "family": "op7_other",
+      "origin": "https://api.fpjs.io",
+      "host": "api.fpjs.io",
+      "path": "/xridvya/qAo6p",
+      "resource_type": "xhr",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T17:58:39.043+00:00"
+    },
+    {
+      "family": "op7_other",
+      "origin": "https://api.v4z22d.com",
+      "host": "api.v4z22d.com",
+      "path": "/v1/user/base",
+      "resource_type": "fetch",
+      "method": "POST",
+      "last_observed_at_utc": "2026-11-27T17:58:46.782+00:00"
+    },
+    {
+      "family": "op7_other",
+      "origin": "https://cgweb.op7uat.com",
+      "host": "cgweb.op7uat.com",
+      "path": "/locales/zh-CN.json",
+      "resource_type": "fetch",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T17:57:55.104+00:00"
+    },
+    {
+      "family": "op7_other",
+      "origin": "https://cgweb.op7uat.com",
+      "host": "cgweb.op7uat.com",
+      "path": "/v2/api/center/message/summary",
+      "resource_type": "fetch",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T17:58:38.009+00:00"
+    },
+    {
+      "family": "op7_other",
+      "origin": "https://cgweb.op7uat.com",
+      "host": "cgweb.op7uat.com",
+      "path": "/v3/getLoginLog",
+      "resource_type": "fetch",
+      "method": "POST",
+      "last_observed_at_utc": "2026-11-27T17:58:37.985+00:00"
+    },
+    {
+      "family": "op7_other",
+      "origin": "https://cgweb.op7uat.com",
+      "host": "cgweb.op7uat.com",
+      "path": "/v3/login2",
+      "resource_type": "fetch",
+      "method": "POST",
+      "last_observed_at_utc": "2026-11-27T17:58:36.177+00:00"
+    },
+    {
+      "family": "op7_other",
+      "origin": "https://cgweb.op7uat.com",
+      "host": "cgweb.op7uat.com",
+      "path": "/v3/util/captchaRequired",
+      "resource_type": "fetch",
+      "method": "POST",
+      "last_observed_at_utc": "2026-11-27T17:58:32.619+00:00"
+    },
+    {
+      "family": "op7_other",
+      "origin": "https://errlog.umeng.com",
+      "host": "errlog.umeng.com",
+      "path": "/apm_cc_web",
+      "resource_type": "xhr",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T17:56:53.800+00:00"
+    },
+    {
+      "family": "op7_other",
+      "origin": "https://op7-spa-testing.test800.xyz",
+      "host": "op7-spa-testing.test800.xyz",
+      "path": "/cdn-cgi/rum",
+      "resource_type": "xhr",
+      "method": "POST",
+      "last_observed_at_utc": "2026-11-27T17:53:34.068+00:00"
+    },
+    {
+      "family": "op7_other",
+      "origin": "https://op7-spa-testing.test800.xyz",
+      "host": "op7-spa-testing.test800.xyz",
+      "path": "/locales/zh-CN.json",
+      "resource_type": "fetch",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T17:53:34.058+00:00"
+    },
+    {
+      "family": "op7_other",
+      "origin": "https://op7-spa-testing.test800.xyz",
+      "host": "op7-spa-testing.test800.xyz",
+      "path": "/v2/api/center/message/summary",
+      "resource_type": "fetch",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T17:53:34.175+00:00"
+    },
+    {
+      "family": "pingbo",
+      "origin": "https://ekr.zdassets.com",
+      "host": "ekr.zdassets.com",
+      "path": "/compose/8834247d-a969-42b8-8487-46d570c22e4a",
+      "resource_type": "fetch",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T17:53:39.610+00:00"
+    },
+    {
+      "family": "pingbo",
+      "origin": "https://www.part567.com",
+      "host": "www.part567.com",
+      "path": "/cms/assets/17b3cb64-c0ba-4784-83ab-f2f509b7415b",
+      "resource_type": "fetch",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T17:53:40.030+00:00"
+    },
+    {
+      "family": "pingbo",
+      "origin": "https://www.part567.com",
+      "host": "www.part567.com",
+      "path": "/cms/assets/1be46c13-1601-4bb9-a885-415c7dded02b",
+      "resource_type": "fetch",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T17:53:40.016+00:00"
+    },
+    {
+      "family": "pingbo",
+      "origin": "https://www.part567.com",
+      "host": "www.part567.com",
+      "path": "/cms/assets/2d362bb4-7b8f-472a-91be-5f3ef5e71688",
+      "resource_type": "fetch",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T17:53:40.012+00:00"
+    },
+    {
+      "family": "pingbo",
+      "origin": "https://www.part567.com",
+      "host": "www.part567.com",
+      "path": "/cms/assets/592d18aa-3a1f-4b8c-a709-7e184b85648b",
+      "resource_type": "fetch",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T17:53:40.032+00:00"
+    },
+    {
+      "family": "pingbo",
+      "origin": "https://www.part567.com",
+      "host": "www.part567.com",
+      "path": "/cms/assets/79b95909-e47d-4b93-a1bb-acc34ce0662f",
+      "resource_type": "fetch",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T17:53:40.034+00:00"
+    },
+    {
+      "family": "pingbo",
+      "origin": "https://www.part567.com",
+      "host": "www.part567.com",
+      "path": "/cms/assets/7a688588-fbc1-4602-b101-75eb78427ef0",
+      "resource_type": "fetch",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T17:53:40.020+00:00"
+    },
+    {
+      "family": "pingbo",
+      "origin": "https://www.part567.com",
+      "host": "www.part567.com",
+      "path": "/cms/assets/8075d6a0-44df-46a2-a945-9bea4eb5f01e",
+      "resource_type": "fetch",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T17:53:40.023+00:00"
+    },
+    {
+      "family": "pingbo",
+      "origin": "https://www.part567.com",
+      "host": "www.part567.com",
+      "path": "/cms/assets/a8f46976-ae9e-4ec1-a489-81f488c593cf",
+      "resource_type": "fetch",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T17:53:40.018+00:00"
+    },
+    {
+      "family": "pingbo",
+      "origin": "https://www.part567.com",
+      "host": "www.part567.com",
+      "path": "/cms/assets/a9026860-c37e-4796-b958-3f0ae91ba981",
+      "resource_type": "fetch",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T17:53:40.013+00:00"
+    },
+    {
+      "family": "pingbo",
+      "origin": "https://www.part567.com",
+      "host": "www.part567.com",
+      "path": "/cms/assets/a9946268-dc7a-4735-bf32-3749aecce048",
+      "resource_type": "fetch",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T17:53:40.035+00:00"
+    },
+    {
+      "family": "pingbo",
+      "origin": "https://www.part567.com",
+      "host": "www.part567.com",
+      "path": "/cms/assets/b2706ed4-8f1f-496d-9e6d-2685f39eff02",
+      "resource_type": "fetch",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T17:53:40.027+00:00"
+    },
+    {
+      "family": "pingbo",
+      "origin": "https://www.part567.com",
+      "host": "www.part567.com",
+      "path": "/cms/assets/db98636a-41b5-4dff-8eea-df770d582d80",
+      "resource_type": "fetch",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T17:53:40.014+00:00"
+    },
+    {
+      "family": "pingbo",
+      "origin": "https://www.part567.com",
+      "host": "www.part567.com",
+      "path": "/cms/assets/ec95f2a9-b93c-4163-a51c-b56bf4891905",
+      "resource_type": "fetch",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T17:53:40.010+00:00"
+    },
+    {
+      "family": "pingbo",
+      "origin": "https://www.part567.com",
+      "host": "www.part567.com",
+      "path": "/cms/assets/f19f0b75-1213-46f2-adf6-62d9d7d71fe8",
+      "resource_type": "fetch",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T17:53:40.022+00:00"
+    },
+    {
+      "family": "pingbo",
+      "origin": "https://www.part567.com",
+      "host": "www.part567.com",
+      "path": "/cms/assets/f351cf3c-1f4c-4ffa-b5b5-101235462e73",
+      "resource_type": "fetch",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T17:53:40.025+00:00"
+    },
+    {
+      "family": "pingbo",
+      "origin": "https://www.part567.com",
+      "host": "www.part567.com",
+      "path": "/cms/graphql",
+      "resource_type": "xhr",
+      "method": "POST",
+      "last_observed_at_utc": "2026-11-27T17:53:39.614+00:00"
+    },
+    {
+      "family": "pingbo",
+      "origin": "https://www.part567.com",
+      "host": "www.part567.com",
+      "path": "/dp-iframe/",
+      "resource_type": "xhr",
+      "method": "HEAD",
+      "last_observed_at_utc": "2026-11-27T17:53:39.620+00:00"
+    },
+    {
+      "family": "pingbo",
+      "origin": "https://www.part567.com",
+      "host": "www.part567.com",
+      "path": "/esthardsk/locales/en/en.json",
+      "resource_type": "fetch",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T17:53:35.819+00:00"
+    },
+    {
+      "family": "pingbo",
+      "origin": "https://www.part567.com",
+      "host": "www.part567.com",
+      "path": "/esthardsk/locales/zh-cn/zh-cn.json",
+      "resource_type": "fetch",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T17:53:39.613+00:00"
+    },
+    {
+      "family": "pingbo",
+      "origin": "https://www.part567.com",
+      "host": "www.part567.com",
+      "path": "/favicon.ico",
+      "resource_type": "xhr",
+      "method": "HEAD",
+      "last_observed_at_utc": "2026-11-27T18:02:05.026+00:00"
+    },
+    {
+      "family": "pingbo",
+      "origin": "https://www.part567.com",
+      "host": "www.part567.com",
+      "path": "/member-auth/v2/auth",
+      "resource_type": "xhr",
+      "method": "POST",
+      "last_observed_at_utc": "2026-11-27T17:54:04.640+00:00"
+    },
+    {
+      "family": "pingbo",
+      "origin": "https://www.part567.com",
+      "host": "www.part567.com",
+      "path": "/member-auth/v2/keep-alive",
+      "resource_type": "xhr",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T18:07:43.260+00:00"
+    },
+    {
+      "family": "pingbo",
+      "origin": "https://www.part567.com",
+      "host": "www.part567.com",
+      "path": "/member-auth/v2/swstoken",
+      "resource_type": "xhr",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T17:54:10.042+00:00"
+    },
+    {
+      "family": "pingbo",
+      "origin": "https://www.part567.com",
+      "host": "www.part567.com",
+      "path": "/member-service/v2/account-balance",
+      "resource_type": "xhr",
+      "method": "POST",
+      "last_observed_at_utc": "2026-11-27T17:53:39.623+00:00"
+    },
+    {
+      "family": "pingbo",
+      "origin": "https://www.part567.com",
+      "host": "www.part567.com",
+      "path": "/member-service/v2/account-balance",
+      "resource_type": "xhr",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T18:07:40.525+00:00"
+    },
+    {
+      "family": "pingbo",
+      "origin": "https://www.part567.com",
+      "host": "www.part567.com",
+      "path": "/member-service/v2/announcement/list-limit",
+      "resource_type": "xhr",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T18:06:13.613+00:00"
+    },
+    {
+      "family": "pingbo",
+      "origin": "https://www.part567.com",
+      "host": "www.part567.com",
+      "path": "/member-service/v2/data.nocache-v2",
+      "resource_type": "xhr",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T17:54:08.492+00:00"
+    },
+    {
+      "family": "pingbo",
+      "origin": "https://www.part567.com",
+      "host": "www.part567.com",
+      "path": "/member-service/v2/finger-print",
+      "resource_type": "xhr",
+      "method": "POST",
+      "last_observed_at_utc": "2026-11-27T17:53:38.596+00:00"
+    },
+    {
+      "family": "pingbo",
+      "origin": "https://www.part567.com",
+      "host": "www.part567.com",
+      "path": "/member-service/v2/get-guest-setting",
+      "resource_type": "xhr",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T17:53:44.734+00:00"
+    },
+    {
+      "family": "pingbo",
+      "origin": "https://www.part567.com",
+      "host": "www.part567.com",
+      "path": "/member-service/v2/get-sum-announcement-unread",
+      "resource_type": "xhr",
+      "method": "POST",
+      "last_observed_at_utc": "2026-11-27T17:53:39.624+00:00"
+    },
+    {
+      "family": "pingbo",
+      "origin": "https://www.part567.com",
+      "host": "www.part567.com",
+      "path": "/member-service/v2/load-new-mobile-template",
+      "resource_type": "xhr",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T17:54:08.490+00:00"
+    },
+    {
+      "family": "pingbo",
+      "origin": "https://www.part567.com",
+      "host": "www.part567.com",
+      "path": "/member-service/v2/load-template",
+      "resource_type": "xhr",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T17:53:35.823+00:00"
+    },
+    {
+      "family": "pingbo",
+      "origin": "https://www.part567.com",
+      "host": "www.part567.com",
+      "path": "/member-service/v2/quick-stake/get-info",
+      "resource_type": "xhr",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T17:54:09.016+00:00"
+    },
+    {
+      "family": "pingbo",
+      "origin": "https://www.part567.com",
+      "host": "www.part567.com",
+      "path": "/member-service/v2/sportsbook-favorite/get-sports-book-favorite-by-user-id",
+      "resource_type": "xhr",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T18:02:28.170+00:00"
+    },
+    {
+      "family": "pingbo",
+      "origin": "https://www.part567.com",
+      "host": "www.part567.com",
+      "path": "/member-service/v2/system/status",
+      "resource_type": "xhr",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T18:07:50.566+00:00"
+    },
+    {
+      "family": "pingbo",
+      "origin": "https://www.part567.com",
+      "host": "www.part567.com",
+      "path": "/member-service/v2/tournament/buttons",
+      "resource_type": "xhr",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T17:53:39.625+00:00"
+    },
+    {
+      "family": "pingbo",
+      "origin": "https://www.part567.com",
+      "host": "www.part567.com",
+      "path": "/sports-service/sv/mobile/event",
+      "resource_type": "xhr",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T18:02:24.494+00:00"
+    },
+    {
+      "family": "pingbo",
+      "origin": "https://www.part567.com",
+      "host": "www.part567.com",
+      "path": "/sports-service/sv/mobile/league-events",
+      "resource_type": "xhr",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T18:02:24.772+00:00"
+    },
+    {
+      "family": "pingbo",
+      "origin": "https://www.part567.com",
+      "host": "www.part567.com",
+      "path": "/sports-service/sv/mobile/leagues",
+      "resource_type": "xhr",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T18:07:43.768+00:00"
+    },
+    {
+      "family": "pingbo",
+      "origin": "https://www.part567.com",
+      "host": "www.part567.com",
+      "path": "/sports-service/sv/mobile/market-filters",
+      "resource_type": "xhr",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T18:07:44.276+00:00"
+    },
+    {
+      "family": "pingbo",
+      "origin": "https://www.part567.com",
+      "host": "www.part567.com",
+      "path": "/sports-service/sv/mobile/odds-live",
+      "resource_type": "xhr",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T18:07:50.569+00:00"
+    },
+    {
+      "family": "pingbo",
+      "origin": "https://www.part567.com",
+      "host": "www.part567.com",
+      "path": "/sports-service/sv/mobile/odds-today",
+      "resource_type": "xhr",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T18:07:33.150+00:00"
+    },
+    {
+      "family": "pingbo",
+      "origin": "https://www.part567.com",
+      "host": "www.part567.com",
+      "path": "/sports-service/sv/mobile/sports",
+      "resource_type": "xhr",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T18:07:43.258+00:00"
+    },
+    {
+      "family": "pingbo",
+      "origin": "https://www.part567.com",
+      "host": "www.part567.com",
+      "path": "/sports-service/sv/odds/periods",
+      "resource_type": "xhr",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T17:54:09.524+00:00"
+    },
+    {
+      "family": "pingbo",
+      "origin": "https://www.part567.com",
+      "host": "www.part567.com",
+      "path": "/xst/asset/icon/selection.json",
+      "resource_type": "fetch",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T17:54:08.488+00:00"
+    },
+    {
+      "family": "pingbo",
+      "origin": "https://www.part567.com",
+      "host": "www.part567.com",
+      "path": "/xst/locale/zh-cn.json",
+      "resource_type": "fetch",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T17:54:10.036+00:00"
+    },
+    {
+      "family": "pingbo",
+      "origin": "https://www.part567.com",
+      "host": "www.part567.com",
+      "path": "/xst/theme/default.json",
+      "resource_type": "fetch",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T17:54:09.010+00:00"
+    },
+    {
+      "family": "pingbo",
+      "origin": "https://www.part567.com",
+      "host": "www.part567.com",
+      "path": "/xst/theme/pa.json",
+      "resource_type": "fetch",
+      "method": "GET",
+      "last_observed_at_utc": "2026-11-27T17:54:09.005+00:00"
+    }
+  ]
 }
