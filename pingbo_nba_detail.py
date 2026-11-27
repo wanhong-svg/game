@@ -325,7 +325,6 @@ def extract_moneyline(event: dict[str, Any]) -> dict[str, Any] | list[Any] | Non
                                      if value.get(k) not in (None, "")), None)
                     if side and raw_odds is not None:
                         selections.append({"side": side, "raw_odds": raw_odds,
-                                           "decimal_odds": american_to_decimal(raw_odds),
                                            "source_path": f"{path}[{index}]".strip(".")})
                     walk(value, f"{path}[{index}]".strip("."))
 
@@ -399,7 +398,8 @@ class PingboClient:
             _trace({"kind": "pingbo_state_save_error", "error_type": type(exc).__name__, "error": str(exc)})
 
     def _record_market_changes(self, event_id: str, event: dict[str, Any]) -> None:
-        previous = self._event_cache.get(event_id, {})
+        previous_record = self._event_cache.get(event_id, {})
+        previous = previous_record.get("event", previous_record) if isinstance(previous_record, dict) else {}
         old_markets = {"periods": previous.get("periods"), "moneyLine": previous.get("moneyLine", previous.get("moneyline"))}
         new_markets = {"periods": event.get("periods"), "moneyLine": event.get("moneyLine", event.get("moneyline"))}
         old_hash = hashlib.sha256(json.dumps(old_markets, sort_keys=True, ensure_ascii=False, default=str).encode()).hexdigest()
@@ -472,6 +472,7 @@ class PingboClient:
                     event_id = str(event["id"])
                     incoming[event_id] = {"event": event, "league": league}
 
+        refresh_all = data.get("refreshAll")
         update_payload = data.get("update")
         update_records = 0
 
@@ -500,10 +501,9 @@ class PingboClient:
                 for child in node:
                     apply_update(child)
 
-        if update_payload not in (None, {}, []):
+        if refresh_all is not True and update_payload not in (None, {}, []):
             apply_update(update_payload)
 
-        refresh_all = data.get("refreshAll")
         if refresh_all is True:
             self._event_cache = incoming
             cache_action = "replace_full_snapshot"
